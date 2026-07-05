@@ -394,8 +394,28 @@ app.all("/api/result", (req, res) => {
   reqResult.end();
 });
 
-// ==================== N8N PROXY ENDPOINTS ====================
+// ==================== N8N PROXY & LOG ENDPOINTS ====================
 const N8N_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxODQ2MDMzNS04MmEyLTQwMmItYTgyOS1hOGVlNWEwMWJhMDAiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiZTI3ZjUxZDEtYjY1Yi00ODhhLTk4OTktMDJlN2NhOTdjNjllIiwiaWF0IjoxNzgzMjUwNTI2LCJleHAiOjE3ODU4MTYwMDB9.rUVrFE5IjZNR1vMguKpY6KHwgo8OCH9NMM9hMoCvaas";
+
+const n8nNotifications = [];
+
+app.post("/api/n8n/log", (req, res) => {
+  const { title, summary, body, type } = req.body || {};
+  n8nNotifications.unshift({
+    id: Math.random().toString(36).substring(2, 9),
+    title: title || "Powiadomienie n8n",
+    summary: summary || "",
+    body: body || "",
+    type: type || "info",
+    timestamp: new Date().toISOString()
+  });
+  if (n8nNotifications.length > 50) n8nNotifications.pop();
+  res.json({ ok: true });
+});
+
+app.get("/api/n8n/log", (req, res) => {
+  res.json({ ok: true, data: n8nNotifications });
+});
 
 app.get("/api/n8n/workflows", (req, res) => {
   const options = {

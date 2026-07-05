@@ -1070,6 +1070,19 @@
         </div>
         <div id="n8n-workflows-list" class="apps-grid" style="grid-template-columns: 1fr; gap: 14px; padding: 14px 0;">
           <div class="empty-state">Ładowanie przepływów…</div>
+      </div>
+
+      <!-- New panel: Ostatnie raporty i analizy AI -->
+      <div class="panel" style="margin-top: 18px;">
+        <div class="panel-header">
+          <div>
+            <h2>Ostatnie raporty i analizy AI</h2>
+            <div class="meta">Powiadomienia i podsumowania z n8n</div>
+          </div>
+          <button class="btn" onclick="refreshN8nLogs()">Odśwież</button>
+        </div>
+        <div id="n8n-reports-list" style="padding: 10px 0; display: flex; flex-direction: column; gap: 14px;">
+          <div class="empty-state">Brak raportów.</div>
         </div>
       </div>
 
@@ -1963,7 +1976,8 @@
     async function refreshN8nData() {
       await Promise.all([
         refreshN8nWorkflows(),
-        refreshN8nExecutions()
+        refreshN8nExecutions(),
+        refreshN8nLogs()
       ]);
     }
 
@@ -2070,6 +2084,39 @@
         }).join("");
       } catch (e) {
         tbody.innerHTML = `<tr><td colspan="4" style="color: var(--danger); text-align: center; padding: 20px;">Błąd pobierania historii: ${escapeHtml(e.message)}</td></tr>`;
+      }
+    }
+
+    async function refreshN8nLogs() {
+      const listEl = document.getElementById("n8n-reports-list");
+      listEl.innerHTML = '<div class="empty-state">Ładowanie raportów…</div>';
+
+      try {
+        const res = await fetch("/api/n8n/log");
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || "Błąd pobierania");
+
+        const logs = json.data;
+        if (logs.length === 0) {
+          listEl.innerHTML = '<div class="empty-state">Brak raportów.</div>';
+          return;
+        }
+
+        listEl.innerHTML = logs.map(item => `
+          <div class="app-card" style="flex-direction: column; align-items: stretch; gap: 10px; padding: 16px; background: linear-gradient(180deg, rgba(38, 48, 68, 0.6), rgba(28, 36, 50, 0.6)); border: 1px solid rgba(255,255,255,0.07);">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">
+              <strong style="color: #6ea8fe; font-size: 14px;">${escapeHtml(item.title)}</strong>
+              <span class="meta" style="font-size: 11px; color: var(--muted);">${formatTime(item.timestamp)}</span>
+            </div>
+            <div style="color: var(--text); font-size: 13px; font-weight: 500; line-height: 1.4; margin-top: 4px;">${escapeHtml(item.summary)}</div>
+            <details style="margin-top: 8px;">
+              <summary style="cursor: pointer; color: var(--muted); font-size: 12px; font-weight: bold; outline: none; user-select: none;">Pokaż szczegóły raportu</summary>
+              <pre style="margin-top: 10px; background: rgba(0,0,0,0.25); padding: 12px; border-radius: 8px; font-family: monospace; font-size: 11px; white-space: pre-wrap; color: #a6b0cf; border: 1px solid rgba(255,255,255,0.05); overflow-x: auto; max-height: 300px;">${escapeHtml(item.body)}</pre>
+            </details>
+          </div>
+        `).join("");
+      } catch (e) {
+        listEl.innerHTML = `<div class="empty-state" style="color: var(--danger);">Błąd: ${escapeHtml(e.message)}</div>`;
       }
     }
 
