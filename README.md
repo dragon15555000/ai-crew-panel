@@ -1,6 +1,6 @@
 # AI Crew Panel
 
-Szybki lokalny panel podglądu zdarzeń i decyzji przesyłanych przez n8n lub bezpośrednio z webhooków.
+Lokalny panel do zarządzania i podglądu statusu aplikacji uruchomionych w środowisku deweloperskim.
 
 ## Porty lokalne
 
@@ -8,33 +8,46 @@ Poniższe zestawienie przedstawia alokację portów w lokalnym środowisku dewel
 * **3000** - `new-api` (Bramka/baza modeli LLM)
 * **5055** - `ai_crew` Cockpit (Główny panel sterowania)
 * **5056** - `DocPortal` (Gunicorn/Flask lista dokumentów)
-* **5057** - `ai-crew-panel` (Ten panel zdarzeń)
+* **5058** - `ai-crew-panel` (Ten panel)
 
-## Instrukcje i przykłady integracji
+## Funkcje panelu
 
-### Adresy i endpointy panelu
-* **Strona główna panelu:** [http://127.0.0.1:5057](http://127.0.0.1:5057)
-* **Endpoint zapisu zdarzeń:** `POST http://127.0.0.1:5057/ai-crew-events`
-* **Status usługi (Health):** `GET http://127.0.0.1:5057/health`
-* **Zdarzenia w formacie JSON:** `GET http://127.0.0.1:5057/events`
+* Podgląd stanu aplikacji i usług w jednym miejscu
+* Szybkie akcje: start, stop, restart, health check
+* Ręczny skan portów i dodawanie wykrytych wpisów do katalogu
+* Podsumowanie stanu środowiska, filtracja i wyszukiwanie
+* Historia operacji i lista problemów do sprawdzenia
 
-### Konfiguracja n8n (HTTP Request Node)
+## Adresy i endpointy panelu
 
-* **Metoda:** `POST`
-* **URL:** `http://127.0.0.1:5057/ai-crew-events` (lub `http://host.docker.internal:5057/ai-crew-events` jeśli n8n działa w Dockerze)
-* **Content-Type:** `JSON`
+* **Strona główna panelu:** [http://127.0.0.1:5058](http://127.0.0.1:5058)
+* **Health:** `GET http://127.0.0.1:5058/health`
+* **Lista aplikacji:** `GET http://127.0.0.1:5058/api/apps`
+* **Status pojedynczej aplikacji:** `GET http://127.0.0.1:5058/api/apps/:appId/status`
+* **Start aplikacji:** `POST http://127.0.0.1:5058/api/apps/:appId/start`
+* **Stop aplikacji:** `POST http://127.0.0.1:5058/api/apps/:appId/stop`
+* **Restart aplikacji:** `POST http://127.0.0.1:5058/api/apps/:appId/restart`
+* **Restart włączonych aplikacji:** `POST http://127.0.0.1:5058/api/apps/restart-enabled`
+* **Szczegóły aplikacji:** `GET http://127.0.0.1:5058/api/apps/:appId/details`
+* **Edycja konfiguracji aplikacji:** `PATCH http://127.0.0.1:5058/api/apps/:appId`
+* **Log operacji:** `GET http://127.0.0.1:5058/api/operations/log`
+* **Dodanie wykrytego portu do katalogu:** `POST http://127.0.0.1:5058/api/apps/discover/:port`
+* **Ręczny skan portów:** `POST http://127.0.0.1:5058/api/scan`
+* **Odświeżenie danych panelu:** `POST http://127.0.0.1:5058/api/refresh`
 
-#### JSON Body do wklejenia w n8n:
-```json
-{
-  "jobId": "{{$json.jobId || $json.body?.jobId || $execution.id}}",
-  "project": "{{$json.project || $json.body?.project || 'ai_crew'}}",
-  "branch": "{{$json.branch || $json.body?.branch || ''}}",
-  "riskLevel": "{{$json.riskLevel || $json.body?.riskLevel || 'unknown'}}",
-  "isDestructive": "{{$json.isDestructive || false}}",
-  "recommendedAction": "{{$json.recommendedAction || 'review'}}",
-  "status": "waiting_approval",
-  "summary": "{{$json.summary || $json.body?.summary || ''}}",
-  "jobUrl": "{{$json.jobUrl || ''}}"
-}
+## Autostart
+
+W repo znajduje się gotowy unit `ai-crew-panel.service` dla `systemd`. Po instalacji w `/etc/systemd/system/` i włączeniu `systemctl enable --now ai-crew-panel.service` panel startuje automatycznie przy starcie systemu.
+
+Przykład instalacji:
+
+```bash
+sudo install -Dm644 ai-crew-panel.service /etc/systemd/system/ai-crew-panel.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now ai-crew-panel.service
 ```
+
+## Konfiguracja
+
+Domyślny port panelu to `5058`. Możesz go nadpisać zmienną środowiskową `PORT`.
+Panel domyślnie wiąże się do `127.0.0.1`. Jeśli chcesz wystawić go szerzej, ustaw `HOST=0.0.0.0`.
