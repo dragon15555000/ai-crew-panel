@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const LocalAppsManager = require("./server-manager");
 const { collectHardwareSnapshot } = require("./gpu-monitor");
+const { getAllEndpointStatuses, routeOllamaRequest } = require("./ollama-router");
 
 // Załaduj .env bez dodatkowej zależności (systemd też używa EnvironmentFile).
 const envPath = path.join(__dirname, ".env");
@@ -27,10 +28,25 @@ const PUBLIC_HOST = (process.env.PUBLIC_HOST || process.env.SERVER_HOST || "10.1
 const manager = new LocalAppsManager(path.join(__dirname, "local_apps.json"));
 
 let managerReady = false;
+let configReloadTimer = null;
 manager.load().then(() => {
   managerReady = true;
   console.log("📦 Local Apps Manager loaded");
   startPortScanner();
+});
+
+// Reload config from disk when local_apps.json changes (manual edits apply live)
+fs.watch(path.join(__dirname, "local_apps.json"), { persistent: false }, () => {
+  clearTimeout(configReloadTimer);
+  configReloadTimer = setTimeout(async () => {
+    try {
+      await manager.load();
+      managerReady = true;
+      console.log("♻️ Config reloaded from disk");
+    } catch (e) {
+      console.error("Config reload failed:", e.message);
+    }
+  }, 300);
 });
 
 app.use(express.json({ limit: "256kb" }));
@@ -46,6 +62,7 @@ function startPortScanner() {
         port,
         detected_at: new Date().toISOString()
       }));
+      manager.config.lastScanned = new Date().toISOString();
       await manager.save();
       console.log(`🔍 Port scan: found ${discovered.length} open ports`);
     } catch (e) {
@@ -78,6 +95,24 @@ app.get("/api/hardware", async (req, res) => {
   try {
     const snapshot = await collectHardwareSnapshot();
     res.json(snapshot);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get("/api/ollama/endpoints", async (req, res) => {
+  try {
+    const status = await getAllEndpointStatuses();
+    res.json(status);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post("/api/ollama/route", async (req, res) => {
+  try {
+    const result = await routeOllamaRequest(req.body || {});
+    res.status(result.ok ? 200 : 400).json(result);
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
@@ -132,6 +167,7 @@ app.post("/api/scan", async (req, res) => {
       port,
       detected_at: new Date().toISOString()
     }));
+    manager.config.lastScanned = new Date().toISOString();
     await manager.save();
     res.json({
       ok: true,
@@ -395,7 +431,7 @@ app.all("/api/result", (req, res) => {
 });
 
 // ==================== N8N PROXY & LOG ENDPOINTS ====================
-const N8N_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxODQ2MDMzNS04MmEyLTQwMmItYTgyOS1hOGVlNWEwMWJhMDAiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiZTI3ZjUxZDEtYjY1Yi00ODhhLTk4OTktMDJlN2NhOTdjNjllIiwiaWF0IjoxNzgzMjUwNTI2LCJleHAiOjE3ODU4MTYwMDB9.rUVrFE5IjZNR1vMguKpY6KHwgo8OCH9NMM9hMoCvaas";
+const N8N_API_KEY = process.env.N8N_API_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxODQ2MDMzNS04MmEyLTQwMmItYTgyOS1hOGVlNWEwMWJhMDAiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiZTI3ZjUxZDEtYjY1Yi00ODhhLTk4OTktMDJlN2NhOTdjNjllIiwiaWF0IjoxNzgzMjUwNTI2LCJleHAiOjE3ODU4MTYwMDB9.rUVrFE5IjZNR1vMguKpY6KHwgo8OCH9NMM9hMoCvaas";
 
 const n8nNotifications = [];
 

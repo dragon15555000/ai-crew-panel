@@ -51,3 +51,18 @@ sudo systemctl enable --now ai-crew-panel.service
 
 Domyślny port panelu to `5058`. Możesz go nadpisać zmienną środowiskową `PORT`.
 Panel domyślnie wiąże się do `127.0.0.1`. Jeśli chcesz wystawić go szerzej, ustaw `HOST=0.0.0.0`.
+
+## OpenCode i lokalne Ollama
+
+OpenCode w kontenerze `opencode-test` ma skonfigurowane dwa lokalne providery Ollama:
+
+* `ollama-amd` - AMD/Vulkan na `http://172.17.0.1:11435/v1`
+* `ollama-nvidia` - NVIDIA GTX 1080 na `http://172.17.0.1:11434/v1`
+
+Domyślny działający model OpenCode to `ollama-amd/qwen2.5:3b`. NVIDIA jest widoczna w OpenCode jako provider rezerwowy i przyszły mocniejszy backend, ale obecne modele `ollama-nvidia/llama3:8b` oraz `ollama-nvidia/deepseek-coder:6.7b` nie raportują obsługi tool-callingu wymaganej dla głównego agenta kodującego OpenCode.
+
+Backup poprzedniej konfiguracji OpenCode znajduje się w kontenerze:
+
+```bash
+/root/.config/opencode/opencode.jsonc.bak.20260707131450
+```

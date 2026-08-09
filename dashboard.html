@@ -137,6 +137,28 @@
       font-size: 11px;
     }
 
+    .chip.ok strong { color: var(--ok); }
+    .chip.warn strong { color: var(--warn); }
+    .chip.err strong { color: var(--fail); }
+
+    .tab-status {
+      margin-left: 8px;
+      padding: 3px 7px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(9, 16, 26, 0.36);
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+
+    .tab-status.ok { color: var(--ok); }
+    .tab-status.warn { color: var(--warn); }
+    .tab-status.err { color: var(--fail); }
+
     .hero {
       display: grid;
       grid-template-columns: 1.2fr 0.8fr;
@@ -403,6 +425,37 @@
     .proc-list div {
       padding: 4px 0;
       border-top: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .llm-router {
+      margin-top: 14px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .router-controls {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(120px, 1fr)) auto;
+      gap: 10px;
+      align-items: end;
+    }
+
+    .router-result {
+      min-height: 42px;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.03);
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+
+    @media (max-width: 900px) {
+      .router-controls {
+        grid-template-columns: 1fr;
+      }
     }
 
     .toolbar {
@@ -843,13 +896,15 @@
       </div>
       <div class="topbar-right">
         <span class="chip">Panel: <strong id="panel-port">5057</strong></span>
+        <span class="chip" id="gpu-status-chip">GPU: <strong id="gpu-status-text">...</strong></span>
+        <span class="chip" id="llm-status-chip">LLM: <strong id="llm-status-text">...</strong></span>
         <span class="chip">Auto refresh: <strong id="auto-refresh-state">ON</strong></span>
         <span class="chip">Ostatnia aktualizacja: <strong id="last-updated">-</strong></span>
       </div>
     </header>
 
     <div class="tabs-nav">
-      <button class="tab-btn active" onclick="switchTab('apps-tab')">📦 Panel Aplikacji & GPU</button>
+      <button class="tab-btn active" onclick="switchTab('apps-tab')">📦 Panel Aplikacji & GPU <span class="tab-status" id="menu-hardware-status">...</span></button>
       <button class="tab-btn" onclick="switchTab('n8n-tab')">⚡️ Przepływy n8n (Workflowy)</button>
     </div>
 
@@ -927,6 +982,45 @@
       <div id="hardware-grid" class="hardware-grid">
         <div class="empty-state">Ładowanie…</div>
       </div>
+      <div class="llm-router">
+        <div class="panel-header" style="margin-top: 6px;">
+          <div>
+            <h2>Router Ollama</h2>
+            <div class="meta" id="ollama-router-meta">NVIDIA jako główny backend, AMD-Vulkan jako lekki worker.</div>
+          </div>
+          <button class="btn" onclick="refreshOllamaEndpoints(true)">Odśwież endpointy</button>
+        </div>
+        <div id="ollama-endpoints-grid" class="hardware-grid">
+          <div class="empty-state">Ładowanie endpointów Ollama…</div>
+        </div>
+        <div class="router-controls">
+          <label>Backend
+            <select id="ollama-backend-select" class="select">
+              <option value="auto">auto</option>
+              <option value="nvidia">nvidia</option>
+              <option value="amd">amd</option>
+            </select>
+          </label>
+          <label>Tryb
+            <select id="ollama-mode-select" class="select">
+              <option value="light">light</option>
+              <option value="heavy">heavy</option>
+              <option value="chat">chat</option>
+              <option value="batch">batch</option>
+              <option value="helper">helper</option>
+              <option value="embedding">embedding</option>
+            </select>
+          </label>
+          <label>Model
+            <input id="ollama-model-input" class="field" value="qwen2.5:3b" />
+          </label>
+          <label>Prompt testowy
+            <input id="ollama-prompt-input" class="field" value="Odpowiedz jednym slowem: test" />
+          </label>
+          <button class="btn primary" onclick="testOllamaRoute()">Test route</button>
+        </div>
+        <div id="ollama-route-result" class="router-result">Brak testu.</div>
+      </div>
     </section>
 
     <section class="toolbar">
@@ -935,14 +1029,18 @@
         <option value="all">Wszystkie statusy</option>
         <option value="running">Running</option>
         <option value="stopped">Stopped</option>
+        <option value="port_open">Port open</option>
         <option value="port_open_no_health">Port open / no health</option>
         <option value="missing_port">Missing port</option>
         <option value="missing_path">Missing path</option>
+        <option value="error">Error</option>
+        <option value="unknown">Unknown</option>
         <option value="discovered">Discovered</option>
       </select>
       <select id="type-filter" class="select">
         <option value="all">Wszystkie typy</option>
         <option value="python">Python</option>
+        <option value="docker">Docker</option>
         <option value="node">Node</option>
         <option value="go">Go</option>
         <option value="service">Service</option>
@@ -1159,10 +1257,23 @@
       typeFilter: document.getElementById("type-filter"),
       enabledOnly: document.getElementById("enabled-only"),
       hardwareGrid: document.getElementById("hardware-grid"),
-      hardwareMeta: document.getElementById("hardware-meta")
+      hardwareMeta: document.getElementById("hardware-meta"),
+      gpuStatusChip: document.getElementById("gpu-status-chip"),
+      gpuStatusText: document.getElementById("gpu-status-text"),
+      llmStatusChip: document.getElementById("llm-status-chip"),
+      llmStatusText: document.getElementById("llm-status-text"),
+      menuHardwareStatus: document.getElementById("menu-hardware-status"),
+      ollamaRouterMeta: document.getElementById("ollama-router-meta"),
+      ollamaEndpointsGrid: document.getElementById("ollama-endpoints-grid"),
+      ollamaBackendSelect: document.getElementById("ollama-backend-select"),
+      ollamaModeSelect: document.getElementById("ollama-mode-select"),
+      ollamaModelInput: document.getElementById("ollama-model-input"),
+      ollamaPromptInput: document.getElementById("ollama-prompt-input"),
+      ollamaRouteResult: document.getElementById("ollama-route-result")
     };
 
     let hardwareData = null;
+    let ollamaEndpointsData = null;
 
     function escapeHtml(value) {
       return String(value ?? "")
@@ -1221,11 +1332,82 @@
       return pctValue >= 85 ? "bar-fill warn" : "bar-fill";
     }
 
+    function setStatusClass(node, statusClass) {
+      if (!node) return;
+      node.classList.remove("ok", "warn", "err");
+      if (statusClass) node.classList.add(statusClass);
+    }
+
+    function summarizeHardware(hw) {
+      const gpuInfo = hw?.gpu || {};
+      const ollama = hw?.ollama || {};
+      const gpus = gpuInfo.gpus || [];
+      const activeGpuCount = gpus.filter(gpu => (gpu.utilization?.gpu_pct || 0) > 5 || (gpu.memory?.used_pct || 0) > 10).length;
+      const maxGpuUtil = gpus.reduce((max, gpu) => Math.max(max, gpu.utilization?.gpu_pct || 0), 0);
+      const maxVramPct = gpus.reduce((max, gpu) => Math.max(max, gpu.memory?.used_pct || 0), 0);
+      const loadedModels = ollama.loaded_models || [];
+      const installedCount = ollama.installed_count ?? (ollama.installed_models || []).length;
+      const loadedCount = ollama.loaded_count ?? loadedModels.length;
+      const vramMb = Math.round(ollama.vram_loaded_mb || 0);
+      const loadedOnGpu = loadedCount > 0 && vramMb > 0;
+
+      let gpuText = "brak GPU";
+      let gpuClass = "err";
+      if (gpuInfo.available && gpus.length) {
+        gpuText = `${gpus.length} GPU · ${maxGpuUtil}% · VRAM ${maxVramPct}%`;
+        gpuClass = maxGpuUtil >= 85 || maxVramPct >= 85 ? "warn" : "ok";
+      } else if (gpuInfo.error) {
+        gpuText = "niedostepne";
+      }
+
+      let llmText = "offline";
+      let llmClass = "err";
+      if (ollama.available) {
+        llmText = loadedOnGpu
+          ? `${loadedCount}/${installedCount} modeli · ${vramMb} MB`
+          : loadedCount
+            ? `${loadedCount}/${installedCount} modeli · CPU`
+            : `0/${installedCount} modeli`;
+        llmClass = loadedOnGpu ? "ok" : "warn";
+      }
+
+      const menuText = [
+        gpuInfo.available && gpus.length ? `GPU ${activeGpuCount}/${gpus.length}` : "GPU off",
+        ollama.available ? `LLM ${loadedOnGpu ? loadedCount : "CPU"}` : "LLM off"
+      ].join(" · ");
+      const menuClass = gpuClass === "err" || llmClass === "err" ? "err" : (gpuClass === "warn" || llmClass === "warn" ? "warn" : "ok");
+
+      return { gpuText, gpuClass, llmText, llmClass, menuText, menuClass };
+    }
+
+    function renderHardwareStatusSummary(hw) {
+      const summary = summarizeHardware(hw);
+      el.gpuStatusText.textContent = summary.gpuText;
+      el.llmStatusText.textContent = summary.llmText;
+      el.menuHardwareStatus.textContent = summary.menuText;
+      setStatusClass(el.gpuStatusChip, summary.gpuClass);
+      setStatusClass(el.llmStatusChip, summary.llmClass);
+      setStatusClass(el.menuHardwareStatus, summary.menuClass);
+    }
+
+    function renderHardwareStatusError(message) {
+      el.gpuStatusText.textContent = "blad";
+      el.llmStatusText.textContent = "blad";
+      el.menuHardwareStatus.textContent = "GPU/LLM blad";
+      el.gpuStatusChip.title = message || "";
+      el.llmStatusChip.title = message || "";
+      el.menuHardwareStatus.title = message || "";
+      setStatusClass(el.gpuStatusChip, "err");
+      setStatusClass(el.llmStatusChip, "err");
+      setStatusClass(el.menuHardwareStatus, "err");
+    }
+
     function renderHardware() {
       const hw = hardwareData;
       if (!hw) {
         el.hardwareGrid.innerHTML = '<div class="empty-state">Brak danych sprzętowych.</div>';
         el.hardwareMeta.textContent = "Nie udało się pobrać danych.";
+        renderHardwareStatusError("Brak danych sprzętowych");
         return;
       }
 
@@ -1234,6 +1416,8 @@
       const mem = sys.memory || {};
       const gpuInfo = hw.gpu || {};
       const ollama = hw.ollama || {};
+
+      renderHardwareStatusSummary(hw);
 
       el.hardwareMeta.textContent = [
         sys.hostname || "serwer",
@@ -1249,15 +1433,18 @@
         for (const gpu of gpuInfo.gpus) {
           const memPct = gpu.memory?.used_pct ?? 0;
           const utilGpu = gpu.utilization?.gpu_pct ?? 0;
+          const displayIndex = gpu.display_index ?? gpu.index;
+          const isPrimaryGpu = Number(displayIndex) === 0;
+          const fanValue = gpu.fan_pct == null ? (gpu.fan_rpm == null ? "—" : `${gpu.fan_rpm} RPM`) : `${gpu.fan_pct}%`;
 
           cards.push(`
             <div class="gpu-card">
               <div class="gpu-card-head">
                 <div>
-                  <h3>GPU ${escapeHtml(gpu.index)} · ${escapeHtml(gpu.name)}</h3>
+                  <h3>GPU ${escapeHtml(displayIndex)} · ${escapeHtml(gpu.name)}${isPrimaryGpu ? " · główna" : ""}</h3>
                   <div class="sub">Sterownik ${escapeHtml(gpu.driver || "—")} · ${escapeHtml(gpu.vendor || "nvidia")}</div>
                 </div>
-                <span class="badge ${utilGpu > 5 || memPct > 10 ? "running" : "stopped"}">${utilGpu > 5 ? "obciążona" : "idle"}</span>
+                <span class="badge ${utilGpu > 5 || memPct > 10 ? "running" : "stopped"}">${isPrimaryGpu ? "główna" : (utilGpu > 5 ? "obciążona" : "idle")}</span>
               </div>
               <div class="gpu-stat-row">
                 <div class="gpu-stat">
@@ -1292,7 +1479,7 @@
                 </div>
                 <div class="gpu-stat">
                   <div class="label">Wentylator</div>
-                  <div class="value">${escapeHtml(gpu.fan_pct ?? "—")}%</div>
+                  <div class="value">${escapeHtml(fanValue)}</div>
                 </div>
               </div>
             </div>
@@ -1333,14 +1520,15 @@
 
       if (ollama.available) {
         const loaded = ollama.loaded_models || [];
+        const loadedOnGpu = loaded.some(m => (m.size_vram_mb || 0) > 0);
         cards.push(`
           <div class="gpu-card">
             <div class="gpu-card-head">
               <div>
-                <h3>Ollama · modele w VRAM</h3>
+                <h3>Ollama · ${loadedOnGpu ? "modele w VRAM" : "LLM poza GPU"}</h3>
                 <div class="sub">${escapeHtml(ollama.url || "")} · v${escapeHtml(ollama.version || "?")}</div>
               </div>
-              <span class="badge ${loaded.length ? "running" : "stopped"}">${loaded.length ? `${loaded.length} załadowane` : "brak w VRAM"}</span>
+              <span class="badge ${loadedOnGpu ? "running" : "stopped"}">${loadedOnGpu ? `${loaded.length} w GPU` : (loaded.length ? "CPU / 0 VRAM" : "brak w VRAM")}</span>
             </div>
             <div class="gpu-stat-row">
               <div class="gpu-stat">
@@ -1352,7 +1540,7 @@
                 <div class="value">${escapeHtml(ollama.installed_count ?? 0)}</div>
               </div>
               <div class="gpu-stat">
-                <div class="label">VRAM Ollama</div>
+                <div class="label">VRAM LLM</div>
                 <div class="value">${escapeHtml(Math.round(ollama.vram_loaded_mb || 0))} MB</div>
               </div>
             </div>
@@ -1361,7 +1549,7 @@
                 ? loaded.map(m => `
                   <div class="model-item">
                     <strong>${escapeHtml(m.name || m.model)}</strong>
-                    <span>VRAM: ${escapeHtml(m.size_vram_mb ?? "?")} MB · dysk: ${escapeHtml(m.size_mb ?? "?")} MB</span>
+                    <span>${(m.size_vram_mb || 0) > 0 ? `VRAM: ${escapeHtml(m.size_vram_mb)} MB` : "CPU / 0 MB VRAM"} · dysk: ${escapeHtml(m.size_mb ?? "?")} MB</span>
                   </div>
                 `).join("")
                 : '<div class="empty-state" style="padding:12px;">Żaden model nie jest teraz załadowany w pamięci GPU.</div>'}
@@ -1424,7 +1612,101 @@
       } catch (e) {
         el.hardwareGrid.innerHTML = `<div class="empty-state" style="color:var(--fail);">Błąd: ${escapeHtml(e.message)}</div>`;
         el.hardwareMeta.textContent = "Nie udało się pobrać danych sprzętowych.";
+        renderHardwareStatusError(e.message);
         if (showToastMessage) showToast(`Błąd GPU: ${e.message}`, false);
+      }
+    }
+
+    function renderOllamaEndpoints() {
+      const data = ollamaEndpointsData;
+      if (!data || !data.endpoints) {
+        el.ollamaEndpointsGrid.innerHTML = '<div class="empty-state">Brak danych endpointów Ollama.</div>';
+        el.ollamaRouterMeta.textContent = "Nie udało się pobrać statusu endpointów.";
+        return;
+      }
+
+      const defaultBackend = data.default_backend || "nvidia";
+      const onlineCount = data.endpoints.filter(endpoint => endpoint.online).length;
+      el.ollamaRouterMeta.textContent = `${onlineCount}/${data.endpoints.length} online · domyślny: ${defaultBackend}`;
+      el.ollamaEndpointsGrid.innerHTML = data.endpoints.map(endpoint => {
+        const models = endpoint.models || [];
+        const loaded = endpoint.loaded_models || [];
+        return `
+          <div class="gpu-card">
+            <div class="gpu-card-head">
+              <div>
+                <h3>${escapeHtml(endpoint.backend)} · ${escapeHtml(endpoint.id)}${endpoint.default ? " · domyślny" : ""}</h3>
+                <div class="sub">${escapeHtml(endpoint.url)} · port ${escapeHtml(endpoint.port)} · ${escapeHtml(endpoint.version || "brak wersji")}</div>
+              </div>
+              <span class="badge ${endpoint.online ? "running" : "stopped"}">${endpoint.online ? "online" : "offline"}</span>
+            </div>
+            ${endpoint.error ? `<div class="empty-state" style="padding:10px;color:var(--fail);">${escapeHtml(endpoint.error)}</div>` : ""}
+            <div class="gpu-stat-row">
+              <div class="gpu-stat">
+                <div class="label">Modele</div>
+                <div class="value">${escapeHtml(endpoint.model_count ?? models.length)}</div>
+              </div>
+              <div class="gpu-stat">
+                <div class="label">Załadowane</div>
+                <div class="value">${escapeHtml(endpoint.loaded_count ?? loaded.length)}</div>
+              </div>
+              <div class="gpu-stat">
+                <div class="label">Rola</div>
+                <div class="value" style="font-size:13px">${escapeHtml(endpoint.role || "worker")}</div>
+              </div>
+            </div>
+            <div class="model-list">
+              ${models.length
+                ? models.map(model => `
+                  <div class="model-item">
+                    <strong>${escapeHtml(model.name || model.model)}</strong>
+                    <span>${escapeHtml(model.details?.parameter_size || "model")} · ${escapeHtml(model.details?.quantization_level || "quant")}</span>
+                  </div>
+                `).join("")
+                : '<div class="empty-state" style="padding:12px;">Brak modeli albo endpoint offline.</div>'}
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    async function refreshOllamaEndpoints(showToastMessage = false) {
+      try {
+        ollamaEndpointsData = await requestJson("/api/ollama/endpoints");
+        renderOllamaEndpoints();
+        if (showToastMessage) showToast("Odświeżono endpointy Ollama", true);
+      } catch (e) {
+        el.ollamaEndpointsGrid.innerHTML = `<div class="empty-state" style="color:var(--fail);">Błąd: ${escapeHtml(e.message)}</div>`;
+        el.ollamaRouterMeta.textContent = "Nie udało się pobrać endpointów Ollama.";
+        if (showToastMessage) showToast(`Błąd Ollama: ${e.message}`, false);
+      }
+    }
+
+    async function testOllamaRoute() {
+      el.ollamaRouteResult.textContent = "Wysyłanie testu…";
+      try {
+        const result = await requestJson("/api/ollama/route", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            backend: el.ollamaBackendSelect.value,
+            mode: el.ollamaModeSelect.value,
+            model: el.ollamaModelInput.value.trim(),
+            prompt: el.ollamaPromptInput.value.trim()
+          })
+        });
+        el.ollamaRouteResult.textContent = [
+          `backend: ${result.backend}`,
+          `endpoint: ${result.endpoint}`,
+          `model: ${result.model}`,
+          `reason: ${result.reason}`,
+          `response: ${result.response}`
+        ].join("\n");
+        await refreshOllamaEndpoints(false);
+        await refreshHardware(false);
+      } catch (e) {
+        el.ollamaRouteResult.textContent = `Błąd routingu: ${e.message}`;
+        showToast(`Błąd routingu Ollama: ${e.message}`, false);
       }
     }
 
@@ -1503,10 +1785,22 @@
       `).join("");
     }
 
+    function appRank({ app, status }) {
+      // Włączone i działające najpierw, wpisy bez konfiguracji (wykryte) na końcu
+      const s = status.status || "unknown";
+      let rank = 0;
+      if (app.enabled) rank -= 200;
+      if (s === "running") rank -= 100;
+      if (s === "port_open" || s === "port_open_no_health") rank -= 50;
+      if (!app.enabled && !app.path) rank += 100;
+      return rank;
+    }
+
     function renderApps() {
       const filtered = state.apps
         .map(app => ({ app, status: getStatus(app) }))
-        .filter(({ app, status }) => matchesFilters(app, status));
+        .filter(({ app, status }) => matchesFilters(app, status))
+        .sort((a, b) => appRank(a) - appRank(b) || String(a.app.name).localeCompare(String(b.app.name)));
 
       if (!filtered.length) {
         el.appsGrid.innerHTML = '<div class="empty-state">Brak aplikacji pasujących do filtrów.</div>';
@@ -1516,7 +1810,8 @@
       el.appsGrid.innerHTML = filtered.map(({ app, status }) => {
         const statusName = status.status || "unknown";
         const canStart = Boolean(app.enabled && app.startCommand && app.path);
-        const canStop = statusName === "running" && app.stopStrategy === "sigterm";
+        const canStop = Boolean(app.port || app.stopStrategy === "docker");
+        const canRestart = Boolean(canStart && canStop);
         const details = [
           `<div><strong>Port</strong><br>${escapeHtml(getPortLabel(app))}</div>`,
           `<div><strong>Typ</strong><br>${escapeHtml(app.type || "unknown")}</div>`,
@@ -1532,6 +1827,7 @@
                 <div class="app-id">${escapeHtml(app.id)}</div>
               </div>
               <span class="badge ${escapeHtml(statusName)}">${escapeHtml(statusName)}</span>
+              ${app.enabled ? '<span class="badge ok">✓ włączona</span>' : ""}
             </div>
 
             <div class="info-grid">${details}</div>
@@ -1548,7 +1844,7 @@
               <button class="btn" onclick="openDetails(${JSON.stringify(app.id)})">👁 Szczegóły</button>
               <button class="btn primary" onclick="startApp(${JSON.stringify(app.id)})" ${canStart ? "" : "disabled"}>▶ Start</button>
               <button class="btn danger" onclick="stopApp(${JSON.stringify(app.id)})" ${canStop ? "" : "disabled"}>⏹ Stop</button>
-              <button class="btn" onclick="restartApp(${JSON.stringify(app.id)})" ${canStart ? "" : "disabled"}>↻ Restart</button>
+              <button class="btn" onclick="restartApp(${JSON.stringify(app.id)})" ${canRestart ? "" : "disabled"}>↻ Restart</button>
               <button class="btn" onclick="checkHealth(${JSON.stringify(app.id)})" ${app.port ? "" : "disabled"}>🔍 Check</button>
               <button class="btn" onclick="copyUrl(${app.port ? Number(app.port) : "null"}, ${app.url ? JSON.stringify(app.url) : "null"})">⧉ URL</button>
               <button class="btn" onclick="openPort(${app.port ? Number(app.port) : "null"})" ${app.port ? "" : "disabled"}>🌐 Open</button>
@@ -1572,6 +1868,9 @@
 
       const app = selected.app;
       const status = selected.status || {};
+      const canStart = Boolean(app.enabled && app.startCommand && app.path);
+      const canStop = Boolean(app.port || app.stopStrategy === "docker");
+      const canRestart = Boolean(canStart && canStop);
       const dependencies = selected.dependencies || [];
       const logs = selected.logs || [];
       const dependencyRows = dependencies.length
@@ -1605,9 +1904,9 @@
           </div>
 
           <div class="detail-actions">
-            <button class="btn primary" onclick="startApp(${JSON.stringify(app.id)})" ${app.enabled && app.startCommand && app.path ? "" : "disabled"}>Start</button>
-            <button class="btn danger" onclick="stopApp(${JSON.stringify(app.id)})" ${status.status === "running" && app.stopStrategy === "sigterm" ? "" : "disabled"}>Stop</button>
-            <button class="btn" onclick="restartApp(${JSON.stringify(app.id)})" ${app.enabled && app.startCommand && app.path ? "" : "disabled"}>Restart</button>
+            <button class="btn primary" onclick="startApp(${JSON.stringify(app.id)})" ${canStart ? "" : "disabled"}>Start</button>
+            <button class="btn danger" onclick="stopApp(${JSON.stringify(app.id)})" ${canStop ? "" : "disabled"}>Stop</button>
+            <button class="btn" onclick="restartApp(${JSON.stringify(app.id)})" ${canRestart ? "" : "disabled"}>Restart</button>
             <button class="btn" onclick="checkHealth(${JSON.stringify(app.id)})" ${app.port ? "" : "disabled"}>Sprawdź</button>
             <button class="btn" onclick="refreshSelectedApp()">Odśwież szczegóły</button>
           </div>
@@ -2123,6 +2422,7 @@
     loadPublicHost().then(() => {
       refreshDashboard(false);
       refreshHardware(false);
+      refreshOllamaEndpoints(false);
     });
 
     setInterval(() => {
@@ -2133,6 +2433,7 @@
         } else {
           refreshDashboard(false);
           refreshHardware(false);
+          refreshOllamaEndpoints(false);
         }
       }
     }, 10000);

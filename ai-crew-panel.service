@@ -1,0 +1,19 @@
+[Unit]
+Description=AI Crew Panel (events dashboard)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projekty/ai-crew-panel
+EnvironmentFile=%h/projekty/ai-crew-panel/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node %h/projekty/ai-crew-panel/server.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ai-crew-panel
+
+[Install]
+WantedBy=default.target

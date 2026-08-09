@@ -1,0 +1,12 @@
+# Secrets & local config
+.env
+
+# Runtime data
+.chroma_db/
+
+# Local tooling config
+.claude/
+
+# Dependencies & logs
+node_modules/
+*.log

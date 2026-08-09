@@ -1,0 +1,258 @@
+{
+  "version": "1.1",
+  "lastScanned": "2026-08-09T13:12:35.207Z",
+  "apps": [
+    {
+      "id": "recoll-webui",
+      "name": "Recoll WebUI",
+      "path": "/home/dragon/poczta",
+      "port": 9090,
+      "url": "http://10.10.10.164:9090",
+      "type": "docker",
+      "startCommand": "cd /home/dragon/poczta && docker compose start",
+      "stopCommand": "cd /home/dragon/poczta && docker compose stop",
+      "stopStrategy": "docker",
+      "healthUrl": "/",
+      "description": "Wyszukiwarka poczty i załączników (Recoll)",
+      "dependencies": [],
+      "enabled": true,
+      "status": "unknown"
+    },
+    {
+      "id": "ai-crew-cockpit",
+      "name": "AI Crew Cockpit",
+      "path": "/home/dragon/projekty/ai_crew",
+      "port": 5500,
+      "url": "http://10.10.10.164:5500",
+      "type": "python",
+      "startCommand": "cd /home/dragon/projekty/ai_crew && ./scripts/goai web",
+      "stopStrategy": "sigterm",
+      "healthUrl": "/ping",
+      "description": "Główny panel sterowania ai_crew (host)",
+      "dependencies": [
+        "qdrant",
+        "new-api"
+      ],
+      "enabled": false,
+      "status": "unknown"
+    },
+    {
+      "id": "ai-analiza-dokumentow",
+      "name": "AI Analiza Dokumentów",
+      "path": "/home/dragon/projekty/AI_analiza_dokumentow",
+      "port": 5000,
+      "url": "http://10.10.10.164:5000",
+      "type": "python",
+      "startCommand": "cd /home/dragon/projekty/AI_analiza_dokumentow && ./restart-app.sh --user",
+      "stopStrategy": "sigterm",
+      "healthUrl": "/health",
+      "description": "System RAG do analizy dokumentów",
+      "dependencies": [
+        "qdrant"
+      ],
+      "enabled": false,
+      "status": "unknown"
+    },
+    {
+      "id": "new-api",
+      "name": "new-api (LLM Gateway)",
+      "path": "/home/dragon/projekty/new-api",
+      "port": 3000,
+      "url": "http://10.10.10.164:3000",
+      "type": "docker",
+      "startCommand": "cd /home/dragon/projekty/new-api && docker compose up -d",
+      "stopStrategy": "docker",
+      "healthUrl": "/ping",
+      "description": "Bramka API / proxy modeli LLM (Docker)",
+      "dependencies": [],
+      "enabled": false,
+      "status": "unknown"
+    },
+    {
+      "id": "n8n",
+      "name": "n8n (Workflows)",
+      "path": "/home/dragon/projekty/n8n",
+      "port": 5678,
+      "url": "http://10.10.10.164:5678",
+      "type": "docker",
+      "startCommand": "cd /home/dragon/projekty/n8n && docker compose up -d",
+      "stopStrategy": "docker",
+      "healthUrl": "/",
+      "description": "Automatyzacje i workflowy",
+      "dependencies": [],
+      "enabled": false,
+      "status": "unknown"
+    },
+    {
+      "id": "document-analyzer",
+      "name": "Document Analyzer",
+      "path": "/home/dragon/projekty/document_analyzer",
+      "port": 5056,
+      "url": "http://10.10.10.164:5056",
+      "type": "python",
+      "startCommand": "cd /home/dragon/projekty/document_analyzer && . .venv/bin/activate && python run.py --host 0.0.0.0 --port 5056",
+      "stopStrategy": "sigterm",
+      "healthUrl": "/health",
+      "description": "Analizator dokumentów",
+      "dependencies": [],
+      "enabled": false,
+      "status": "unknown"
+    },
+    {
+      "id": "excel-form-mapper",
+      "name": "Excel Form Mapper",
+      "path": "/home/dragon/projekty/plan_excel_mapper",
+      "port": 5058,
+      "url": "http://10.10.10.164:5058",
+      "type": "python",
+      "startCommand": "cd /home/dragon/projekty/plan_excel_mapper && .venv/bin/flask --app app run --host 0.0.0.0 --port 5058",
+      "stopStrategy": "sigterm",
+      "healthUrl": "/",
+      "description": "Mapowanie formularzy z Excela",
+      "dependencies": [],
+      "enabled": false,
+      "status": "unknown"
+    },
+    {
+      "id": "plan-finansowy",
+      "name": "Plan Finansowy",
+      "path": "/home/dragon/projekty/plan_finansowy/plan_excel_mapper",
+      "port": 5555,
+      "url": "http://10.10.10.164:5555",
+      "type": "python",
+      "startCommand": "cd /home/dragon/projekty/plan_finansowy/plan_excel_mapper && .venv/bin/flask --app app.main run --host 0.0.0.0 --port 5555",
+      "stopStrategy": "sigterm",
+      "healthUrl": "/",
+      "description": "Plan finansowy (Flask)",
+      "dependencies": [],
+      "enabled": false,
+      "status": "unknown"
+    },
+    {
+      "id": "gra-mzk",
+      "name": "Gra MZK",
+      "path": "/home/dragon/projekty/gra_mzk",
+      "port": 8090,
+      "url": "http://10.10.10.164:8090",
+      "type": "docker",
+      "startCommand": "docker start gra-mzk",
+      "stopStrategy": "docker",
+      "healthUrl": "/",
+      "description": "Gra edukacyjna MZK (Docker)",
+      "dependencies": [],
+      "enabled": false,
+      "status": "unknown"
+    },
+    {
+      "id": "ai-crew-docker",
+      "name": "ai_crew (Docker :5059)",
+      "path": "/home/dragon/projekty/ai_crew",
+      "port": 5059,
+      "url": "http://10.10.10.164:5059",
+      "type": "docker",
+      "startCommand": "docker start ai-crew",
+      "stopStrategy": "docker",
+      "healthUrl": "/ping",
+      "description": "Kontener Docker ai_crew (alternatywny Cockpit)",
+      "dependencies": [],
+      "enabled": false,
+      "status": "unknown"
+    },
+    {
+      "id": "doc-portal",
+      "name": "Doc Portal (legacy)",
+      "path": "/home/dragon/projekty/ai_crew/.claude/worktrees/mighty-singing-pancake/docportal",
+      "port": null,
+      "type": "python",
+      "startCommand": null,
+      "stopStrategy": "sigterm",
+      "healthUrl": "/",
+      "description": "Stary portal dokumentacji — wyłączony (port 5056 = Document Analyzer)",
+      "dependencies": [],
+      "enabled": false,
+      "status": "disabled"
+    }
+  ],
+  "dependencies": {
+    "qdrant": {
+      "id": "qdrant",
+      "name": "Qdrant Vector DB",
+      "port": 6333,
+      "url": "http://10.10.10.164:6333",
+      "type": "docker",
+      "path": "/home/dragon/projekty/AI_analiza_dokumentow",
+      "startCommand": "cd /home/dragon/projekty/AI_analiza_dokumentow && ./start-qdrant-docker.sh",
+      "stopStrategy": "docker",
+      "healthUrl": "/collections",
+      "description": "Baza wektorowa (Docker qdrant-dokumenty)",
+      "enabled": false,
+      "status": "unknown"
+    },
+    "new-api": {
+      "id": "new-api-dep",
+      "name": "new-api",
+      "port": 3000,
+      "url": "http://10.10.10.164:3000",
+      "type": "docker",
+      "path": "/home/dragon/projekty/new-api",
+      "startCommand": "cd /home/dragon/projekty/new-api && docker compose up -d",
+      "stopStrategy": "docker",
+      "healthUrl": "/ping",
+      "description": "Bramka LLM",
+      "enabled": false,
+      "status": "unknown"
+    },
+    "sqlserver": {
+      "id": "sqlserver",
+      "name": "SQL Server",
+      "port": 1433,
+      "url": "http://10.10.10.164:1433",
+      "type": "service",
+      "path": null,
+      "startCommand": null,
+      "stopStrategy": null,
+      "healthUrl": null,
+      "description": "SQL Server — nie skonfigurowany na tym hoście",
+      "enabled": false,
+      "status": "external_service"
+    }
+  },
+  "discovered": [
+    {
+      "port": 3001,
+      "detected_at": "2026-08-09T13:12:35.206Z"
+    },
+    {
+      "port": 4097,
+      "detected_at": "2026-08-09T13:12:35.207Z"
+    },
+    {
+      "port": 5057,
+      "detected_at": "2026-08-09T13:12:35.207Z"
+    },
+    {
+      "port": 5080,
+      "detected_at": "2026-08-09T13:12:35.207Z"
+    },
+    {
+      "port": 5433,
+      "detected_at": "2026-08-09T13:12:35.207Z"
+    },
+    {
+      "port": 8088,
+      "detected_at": "2026-08-09T13:12:35.207Z"
+    },
+    {
+      "port": 8384,
+      "detected_at": "2026-08-09T13:12:35.207Z"
+    },
+    {
+      "port": 8765,
+      "detected_at": "2026-08-09T13:12:35.207Z"
+    },
+    {
+      "port": 9000,
+      "detected_at": "2026-08-09T13:12:35.207Z"
+    }
+  ]
+}
