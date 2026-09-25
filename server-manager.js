@@ -63,6 +63,11 @@ class LocalAppsManager {
       details: {}
     };
 
+    if (app.type === "external" || app.status === "external_service") {
+      result.status = "external_service";
+      return result;
+    }
+
     if (!app.port) {
       result.status = "missing_port";
       return result;

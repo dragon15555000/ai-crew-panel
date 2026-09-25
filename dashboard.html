@@ -610,6 +610,12 @@
       background: rgba(247,201,72,0.12);
     }
 
+    .badge.external_service {
+      color: #38bdf8;
+      border-color: rgba(56,189,248,0.3);
+      background: rgba(56,189,248,0.12);
+    }
+
     .info-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -895,6 +901,7 @@
         </div>
       </div>
       <div class="topbar-right">
+        <span class="chip">Serwer: <strong id="server-host">192.168.8.209</strong></span>
         <span class="chip">Panel: <strong id="panel-port">5057</strong></span>
         <span class="chip" id="gpu-status-chip">GPU: <strong id="gpu-status-text">...</strong></span>
         <span class="chip" id="llm-status-chip">LLM: <strong id="llm-status-text">...</strong></span>
@@ -1847,7 +1854,7 @@
               <button class="btn" onclick="restartApp(${JSON.stringify(app.id)})" ${canRestart ? "" : "disabled"}>↻ Restart</button>
               <button class="btn" onclick="checkHealth(${JSON.stringify(app.id)})" ${app.port ? "" : "disabled"}>🔍 Check</button>
               <button class="btn" onclick="copyUrl(${app.port ? Number(app.port) : "null"}, ${app.url ? JSON.stringify(app.url) : "null"})">⧉ URL</button>
-              <button class="btn" onclick="openPort(${app.port ? Number(app.port) : "null"})" ${app.port ? "" : "disabled"}>🌐 Open</button>
+              <button class="btn" onclick="openPort(${app.port ? Number(app.port) : "null"}, ${app.url ? JSON.stringify(app.url) : "null"})" ${app.port || app.url ? "" : "disabled"}>🌐 Open</button>
             </div>
           </div>
         `;
@@ -2180,7 +2187,7 @@
       }
     }
 
-    let PUBLIC_HOST = window.__PANEL_PUBLIC_HOST__ || window.location.hostname || "10.10.10.164";
+    let PUBLIC_HOST = window.__PANEL_PUBLIC_HOST__ || window.location.hostname || "192.168.8.209";
 
     function publicAppUrl(port, explicitUrl) {
       if (explicitUrl) return explicitUrl;
@@ -2191,7 +2198,11 @@
       try {
         const res = await fetch("/health");
         const data = await res.json();
-        if (data.publicHost) PUBLIC_HOST = data.publicHost;
+        if (data.publicHost) {
+          PUBLIC_HOST = data.publicHost;
+          const hostEl = document.getElementById("server-host");
+          if (hostEl) hostEl.textContent = PUBLIC_HOST;
+        }
       } catch (_) {}
     }
 
@@ -2209,12 +2220,12 @@
       }
     }
 
-    function openPort(port) {
-      if (!port) {
-        showToast("Brak portu dla tej aplikacji", false);
+    function openPort(port, explicitUrl) {
+      const url = publicAppUrl(port, explicitUrl);
+      if (!url) {
+        showToast("Brak portu ani adresu URL dla tej aplikacji", false);
         return;
       }
-      const url = publicAppUrl(port);
       window.open(url, "_blank", "noopener,noreferrer");
       showToast(`Otwieranie ${url}`, true);
     }

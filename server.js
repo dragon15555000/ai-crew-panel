@@ -22,7 +22,8 @@ if (fs.existsSync(envPath)) {
 const app = express();
 const PORT = Number(process.env.PORT || process.env.PORT_PANEL || 5057);
 const HOST = process.env.HOST || "0.0.0.0";
-const PUBLIC_HOST = (process.env.PUBLIC_HOST || process.env.SERVER_HOST || "10.10.10.164").trim();
+const PUBLIC_HOST = (process.env.PUBLIC_HOST || process.env.SERVER_HOST || "192.168.8.209").trim();
+const COCKPIT_PORT = Number(process.env.PORT_AI_CREW_COCKPIT || 5500);
 
 // Initialize Local Apps Manager
 const manager = new LocalAppsManager(path.join(__dirname, "local_apps.json"));
@@ -35,14 +36,24 @@ manager.load().then(() => {
   startPortScanner();
 });
 
-// Reload config from disk when local_apps.json changes (manual edits apply live)
-fs.watch(path.join(__dirname, "local_apps.json"), { persistent: false }, () => {
+// Reload config from disk when local_apps.json changes (manual edits apply live).
+// Watching the file itself breaks once it's replaced via unlink+rename (atomic
+// write, e.g. by an editor/tool): inotify ties the watch to the old inode and
+// never fires again for the new file at that path. Watching the parent
+// directory survives that, since directory watches report entries appearing
+// under the same name regardless of inode churn.
+const configFileName = "local_apps.json";
+fs.watch(__dirname, { persistent: false }, (eventType, filename) => {
+  if (filename && filename !== configFileName) return;
   clearTimeout(configReloadTimer);
   configReloadTimer = setTimeout(async () => {
     try {
       await manager.load();
       managerReady = true;
-      console.log("♻️ Config reloaded from disk");
+      const stat = await fs.promises.stat(manager.configPath).catch(() => null);
+      console.log(
+        `♻️ Config reloaded apps=${manager.config.apps.length} discovered=${manager.config.discovered.length} mtime=${stat ? stat.mtime.toISOString() : "unknown"}`
+      );
     } catch (e) {
       console.error("Config reload failed:", e.message);
     }
@@ -77,7 +88,14 @@ function startPortScanner() {
 // ==================== ROUTES ====================
 
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "dashboard.html"));
+  const host = req.hostname && req.hostname !== "localhost" && req.hostname !== "127.0.0.1" ? req.hostname : PUBLIC_HOST;
+  try {
+    let html = fs.readFileSync(path.join(__dirname, "dashboard.html"), "utf8");
+    html = html.replace("</head>", `<script>window.__PANEL_PUBLIC_HOST__ = "${host}";</script></head>`);
+    res.send(html);
+  } catch (e) {
+    res.sendFile(path.join(__dirname, "dashboard.html"));
+  }
 });
 
 app.get("/health", (req, res) => {
@@ -310,7 +328,7 @@ app.post("/api/analyze", (req, res) => {
   const postData = JSON.stringify(runPayload);
   const options = {
     hostname: "127.0.0.1",
-    port: 5059,
+    port: COCKPIT_PORT,
     path: "/api/run",
     method: "POST",
     headers: {
@@ -356,7 +374,7 @@ app.all("/api/status", (req, res) => {
 
   const options = {
     hostname: "127.0.0.1",
-    port: 5059,
+    port: COCKPIT_PORT,
     path: `/api/jobs/${jobId}`,
     method: "GET"
   };
@@ -397,7 +415,7 @@ app.all("/api/result", (req, res) => {
 
   const options = {
     hostname: "127.0.0.1",
-    port: 5059,
+    port: COCKPIT_PORT,
     path: `/api/jobs/${jobId}`,
     method: "GET"
   };
