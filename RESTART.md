@@ -1,226 +1,99 @@
-# Funkcje Restartowania Usług - AI Crew Panel
+# Restartowanie usług — AI Crew Panel
 
-## Przegląd
+## Jak panel restartuje aplikacje
 
-Panel zawiera wbudowane funkcje do restartowania usług bez potrzeby ręcznego logowania na serwer.
+Panel nie zabija procesów „na ślepo”. Dla każdego wpisu w `local_apps.json`
+używa strategii dopasowanej do tego, jak aplikacja jest uruchomiona:
 
-## API Endpointy
+| `stopCommand` / `stopStrategy` | Zachowanie |
+|-------------------------------|-----------|
+| `stopCommand` (np. `systemctl --user stop …`, `docker compose stop`) | wykonuje dokładnie tę komendę |
+| `docker` | `docker stop <kontener>`, a gdy to zawiedzie — `docker compose stop` w katalogu wpisu |
+| `sigterm` | SIGTERM (500 ms), potem SIGKILL na procesie trzymającym port |
+| `none` | wpis tylko monitorowany — panel nie próbuje nic zatrzymywać |
 
-### 1. `POST /restart/:serviceName` - Restart usługi
+Start = `startCommand` z `local_apps.json`. Restart = stop + 1 s przerwy + start.
+Jeżeli katalog roboczy wpisu nie istnieje, panel uruchamia komendę w katalogu
+domowym (nie blokuje to usług systemowych ani kontenerów Docker).
 
-Restartuje usługę poprzez zabienie procesu na porcie.
+## API
 
 ```bash
-# Restart AI Analiza Dokumentów
-curl -X POST http://localhost:5057/restart/AI%20Analiza%20Dokumentów
+# restart jednej aplikacji
+curl -X POST http://127.0.0.1:5057/api/apps/ai-crew-cockpit/restart | jq
 
-# Restart n8n
-curl -X POST http://localhost:5057/restart/n8n
+# start / stop
+curl -X POST http://127.0.0.1:5057/api/apps/n8n/start | jq
+curl -X POST http://127.0.0.1:5057/api/apps/n8n/stop  | jq
+
+# restart wszystkich zarządzalnych wpisów z „enabled”
+curl -X POST http://127.0.0.1:5057/api/apps/restart-enabled | jq
+
+# historia operacji
+curl -s "http://127.0.0.1:5057/api/operations/log?limit=20" | jq
 ```
 
-**Odpowiedź:**
+`restart-enabled` pomija sam panel (przerwanie własnego żądania HTTP przerwałoby
+pętlę) oraz wpisy bez `startCommand`.
+
+Przykładowa odpowiedź restartu:
+
 ```json
 {
   "ok": true,
-  "service": "AI Analiza Dokumentów",
-  "log": {
-    "ts": "2026-06-24T10:03:45.123Z",
-    "service": "AI Analiza Dokumentów",
-    "port": 5000,
-    "status": "killed",
-    "message": "Found process PID 1234 on port 5000 → killed",
-    "duration": 523
-  }
+  "message": "AI Crew Cockpit started",
+  "duration": 805,
+  "pid": 1923327,
+  "stop": { "ok": true, "message": "AI Crew Cockpit stopped via stopCommand" }
 }
 ```
 
-### 2. `GET /restart/log` - Historia restartów
+## Co da się zrestartować z panelu na tym hoście
 
-Wyświetla ostatnie 50 prób restartowania usług.
+| Aplikacja | Komenda | Uwaga |
+|-----------|---------|-------|
+| AI Crew Panel | `systemctl --user restart ai-crew-panel` | usługa użytkownika |
+| AI Crew Cockpit | `systemctl --user restart ai-crew-cockpit` | usługa użytkownika |
+| new-api | `cd /home/mg/projekty/new-api && docker compose up -d` | kontener `new-api` |
+| n8n | `cd /home/mg/projekty/n8n && docker compose up -d` | kontener `n8n` |
+| KRS Viewer | `cd /home/mg/projekty/krs_viewer_app && docker compose up -d` | `express-server`, `krs-caddy`, `postgres-db` |
 
-```bash
-curl http://localhost:5057/restart/log
-```
+Wymaga `docker` w grupach użytkownika `mg` oraz `XDG_RUNTIME_DIR` w środowisku
+usługi panelu — oba warunki spełnia `ai-crew-panel.service` z tego repo.
 
-**Odpowiedź:**
-```json
-{
-  "ok": true,
-  "log": [
-    {
-      "ts": "2026-06-24T10:03:45.123Z",
-      "service": "n8n",
-      "port": 5678,
-      "status": "killed",
-      "message": "Found process PID 5432 on port 5678 → Force killing PID 5432",
-      "duration": 850
-    },
-    ...
-  ],
-  "total": 15
-}
-```
+## Czego panel NIE zrestartuje
 
-### 3. `GET /restart/services` - Lista usług do restartowania
+* `aianalizator.service` (AI Analiza Dokumentów) i `qdrant.service` — to usługi
+  systemowe roota; polkit odmawia użytkownikowi `mg` (`Interactive authentication
+  required`). Ręcznie: `sudo systemctl restart aianalizator`.
+* Wpisy oznaczone `enabled: false` (projekty archiwalne, aplikacje nieobecne
+  na tym hoście) — panel pokazuje je jako `disabled`.
 
-```bash
-curl http://localhost:5057/restart/services
-```
+Szczegóły i opcjonalna reguła sudoers: patrz `README.md`.
 
-**Odpowiedź:**
-```json
-{
-  "ok": true,
-  "services": [
-    { "name": "ai_crew Cockpit", "port": 5055 },
-    { "name": "new-api", "port": 3000 },
-    { "name": "DocPortal", "port": 5056 },
-    { "name": "AI Analiza Dokumentów", "port": 5000 },
-    { "name": "ai-crew-panel", "port": 5057 },
-    { "name": "n8n", "port": 5678 }
-  ]
-}
-```
+## Watchdog panelu
 
-## UI Dashboard
-
-### Przycisk Restart
-
-W tabeli "Status usług" każda usługa ma przycisk **"⟳ Restart"**:
-
-1. Kliknij przycisk
-2. Panel znajduje proces na porcie
-3. Wysyła sygnał SIGTERM (graceful shutdown)
-4. Po 500ms, jeśli jeszcze działa, wysyła SIGKILL (force kill)
-5. Toast notification pokazuje wynik
-
-### Przycisk Restart Log
-
-W nagłówku "Status usług" jest przycisk **"Restart Log"** który wyświetla historię ostatnich restartów.
-
-## Konfiguracja Automatycznego Restartowania
-
-Aby automatycznie uruchomić usługę po zabójciu procesu, ustaw zmienne środowiskowe:
+Panel bywa „żywy”, ale bez działającego nasłuchu HTTP — `Restart=always` tego nie
+wykryje, bo proces się nie kończy. Dlatego `watchdog.sh` sprawdza `/health` i
+restartuje usługę; uruchamia go `ai-crew-panel-watchdog.timer` co minutę.
 
 ```bash
-export CMD_AI_CREW="cd /path/to/ai_crew && npm start &"
-export CMD_NEW_API="cd /path/to/new-api && python main.py &"
-export CMD_DOC_PORTAL="cd /path/to/doc_portal && gunicorn app:app &"
-export CMD_AI_ANALIZA="cd /path/to/ai_analiza && python app.py &"
-export CMD_PANEL="cd /path/to/panel && node server.js &"
-export CMD_N8N="cd /path/to/n8n && n8n start &"
-
-node server.js
+./watchdog.sh          # cichy, raportuje tylko problem
+./watchdog.sh -v       # raportuje zawsze
+systemctl --user list-timers ai-crew-panel-watchdog.timer
+journalctl --user -u ai-crew-panel-watchdog -n 20
 ```
-
-## Statusy Restartowania
-
-| Status | Znaczenie |
-|--------|-----------|
-| `killed` | Proces znaleziony i zabity |
-| `no_process` | Brak procesu na porcie |
-| `restarted` | Proces zabity + komendy restartowania wykonane |
-| `restart_failed` | Proces zabity, ale restart nie powiódł się |
-| `error` | Błąd podczas restartowania |
-| `pending` | Restart w trakcie |
-
-## Zachowanie Restartowania
-
-1. **Znalezienie procesu**: `lsof -i :PORT -t` - znajduje PID procesu na porcie
-2. **SIGTERM**: Najpierw wysyła sygnał SIGTERM (graceful shutdown)
-3. **Czekanie**: Czeka 500ms na zamknięcie procesu
-4. **SIGKILL**: Jeśli proces wciąż działa, wysyła SIGKILL (force kill)
-5. **Czekanie**: Czeka 300ms na pełne zamknięcie
-6. **Restart (opcjonalny)**: Jeśli jest ustawiona komenda restartowania, ją wykonuje
-
-## Przykłady
-
-### Restart usługi z CLI
-
-```bash
-# Restart n8n
-curl -X POST http://localhost:5057/restart/n8n
-
-# Restart AI Analiza Dokumentów
-curl -X POST http://localhost:5057/restart/AI%20Analiza%20Dokumentów
-```
-
-### Pobierz historię restartów
-
-```bash
-curl http://localhost:5057/restart/log | jq '.log[0]'
-```
-
-### Skrypt do masowego restartowania
-
-```bash
-#!/bin/bash
-PANEL="http://localhost:5057"
-SERVICES=(
-  "ai_crew Cockpit"
-  "new-api"
-  "DocPortal"
-  "AI Analiza Dokumentów"
-  "n8n"
-)
-
-for service in "${SERVICES[@]}"; do
-  echo "Restarting: $service"
-  curl -X POST "$PANEL/restart/$(echo "$service" | sed 's/ /%20/g')"
-  sleep 2
-done
-```
-
-## Bezpieczeństwo
-
-- Restart można wykonać z UI panelu (URL `http://localhost:5057`)
-- Dostęp do endpointów `/restart/*` jest publiczny
-- **⚠️ W produkcji** dodaj autentykację (JWT, OAuth2 itp.)
 
 ## Troubleshooting
 
-### Restart nie działa
-
-1. Sprawdź czy usługa rzeczywiście działa:
-   ```bash
-   curl http://localhost:5000/health  # Dla AI Analiza
-   ```
-
-2. Sprawdź czy port jest zajęty:
-   ```bash
-   lsof -i :5000
-   ```
-
-3. Sprawdź logi restartów:
-   ```bash
-   curl http://localhost:5057/restart/log
-   ```
-
-### Usługa nie restartuje się automatycznie
-
-Ustaw komendę restartowania:
 ```bash
-export CMD_AI_ANALIZA="cd /home/user/ai-analiza && python app.py > /tmp/ai-analiza.log 2>&1 &"
-node server.js
+# czy port jest zajęty i kto go trzyma
+ss -tlnp | grep -E '5057|5500|5678|3000|5080'
+lsof -i :5057
+
+# logi panelu
+journalctl --user -u ai-crew-panel -n 50 --no-pager
+
+# stan wszystkich jednostek panelu
+systemctl --user status ai-crew-panel ai-crew-panel-watchdog.timer
 ```
-
-## Integracja z n8n
-
-Możesz stworzyć workflow w n8n, który wywoła restart usługi:
-
-```json
-{
-  "nodes": [
-    {
-      "name": "HTTP Request",
-      "type": "n8n-nodes-base.httpRequest",
-      "parameters": {
-        "method": "POST",
-        "url": "http://localhost:5057/restart/n8n",
-        "authentication": "none"
-      }
-    }
-  ]
-}
-```
-

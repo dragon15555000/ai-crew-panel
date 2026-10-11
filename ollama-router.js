@@ -1,22 +1,38 @@
 const http = require("http");
 
+function portFromUrl(url, fallback) {
+  try {
+    return Number(new URL(url).port) || fallback;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+// Endpointy routera są konfigurowalne, dzięki czemu ta sama kopia panelu działa
+// zarówno na hoście z GPU (NVIDIA + AMD-Vulkan), jak i na serwerze CPU-only
+// (jeden lokalny Ollama na :11434).
+const PRIMARY_URL = normalizeEndpointUrl(process.env.OLLAMA_PRIMARY_URL || process.env.OLLAMA_URL || "http://127.0.0.1:11434");
+const SECONDARY_URL = normalizeEndpointUrl(process.env.OLLAMA_SECONDARY_URL || "http://127.0.0.1:11435");
+const PRIMARY_NAME = process.env.OLLAMA_PRIMARY_NAME || "NVIDIA";
+const SECONDARY_NAME = process.env.OLLAMA_SECONDARY_NAME || "AMD-Vulkan";
+
 const OLLAMA_ENDPOINTS = {
   nvidia: {
     id: "nvidia",
-    name: "NVIDIA",
-    backend: "NVIDIA",
+    name: PRIMARY_NAME,
+    backend: PRIMARY_NAME,
     role: "default",
-    url: "http://127.0.0.1:11434",
-    port: 11434,
+    url: PRIMARY_URL,
+    port: portFromUrl(PRIMARY_URL, 11434),
     default: true
   },
   amd: {
     id: "amd",
-    name: "AMD-Vulkan",
-    backend: "AMD-Vulkan",
+    name: SECONDARY_NAME,
+    backend: SECONDARY_NAME,
     role: "light-worker",
-    url: "http://127.0.0.1:11435",
-    port: 11435,
+    url: SECONDARY_URL,
+    port: portFromUrl(SECONDARY_URL, 11435),
     default: false
   }
 };

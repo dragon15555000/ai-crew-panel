@@ -1,139 +1,76 @@
-# Konfiguracja Portów - AI Crew Panel
+# Konfiguracja portów — AI Crew Panel
 
-## Aktualne Porty
+## Porty usług lokalnych (stan faktyczny 2026-09-28, host 192.168.8.209)
 
-| Usługa | Domyślny Port | Zmienna Środowiska |
-|--------|---------------|--------------------|
-| AI Crew Cockpit | 5055 | `PORT_AI_CREW_COCKPIT` |
-| new-api | 3000 | `PORT_NEW_API` |
-| DocPortal | 5056 | `PORT_DOC_PORTAL` |
-| AI Analiza Dokumentów | 5000 | `PORT_AI_ANALIZA` |
-| ai-crew-panel | 5057 | `PORT_PANEL` |
-| n8n | 5678 | `PORT_N8N` |
+| Usługa | Port | Zmienna `.env` | Zarządzanie |
+|--------|------|----------------|-------------|
+| AI Crew Panel | 5057 | `PORT` / `PORT_PANEL` | `systemctl --user restart ai-crew-panel` |
+| AI Crew Cockpit | 5500 | `PORT_AI_CREW_COCKPIT` | `systemctl --user restart ai-crew-cockpit` |
+| new-api (LLM Gateway) | 3000 | `PORT_NEW_API` | Docker |
+| n8n | 5678 | `PORT_N8N` | Docker |
+| KRS Viewer | 5080 | — | Docker |
+| AI Analiza Dokumentów | 5000 | `PORT_AI_ANALIZA` | usługa systemowa (root) |
+| Qdrant | 6333 / 6334 | — | usługa systemowa (root) |
+| Ollama | 11434 | `OLLAMA_URL` | usługa systemowa (root) |
+| bitrix_planowanie (uvicorn) | 8077 | — | poza panelem |
+| Nginx (proxy → :5000) | 80 / 443 | — | usługa systemowa |
+| Postgres KRS | 5433 | — | Docker (`postgres-db`) |
+| Postgres test KRS | 5434 | — | Docker (`krs-postgres-test-db`) |
 
-## Zajęte Porty (skan z 2026-06-24)
+Porty zarezerwowane w katalogu, ale aktualnie wolne (wpisy wyłączone):
+`5056` (Document Analyzer), `5058` (Excel Form Mapper), `5555` (Plan Finansowy),
+`8088` (2KRS), `8090` (Gra MZK), `9000` (Portainer), `3001` (Open WebUI),
+`8384` (Syncthing), `8765` (Recoll MCP), `9090` (Recoll WebUI), `5059` (ai_crew Docker).
 
-```
-Port 5000:  ZAJĘTY (Python - AI Analiza)
-Port 5056:  ZAJĘTY (Flask - DocPortal)
-Port 5057:  ZAJĘTY (Node - ai-crew-panel)
-Port 5678:  ZAJĘTY (n8n)
-Port 11434: ZAJĘTY (Ollama)
-Port 11435: ZAJĘTY (Ollama)
-Port 34219: ZAJĘTY
-Port 38775: ZAJĘTY
-```
+## Zmiana portu panelu
 
-## Zmiana Portów
-
-### Metoda 1: Zmienne Środowiskowe
+### Metoda 1: `.env` (zalecane)
 
 ```bash
-export PORT_AI_CREW_COCKPIT=5100
-export PORT_NEW_API=3100
-export PORT_DOC_PORTAL=5101
-export PORT_AI_ANALIZA=5102
-export PORT_PANEL=5103
-export PORT_N8N=5104
-
-node server.js
+cd /home/mg/projekty/ai-crew-panel
+# edytuj PORT w .env
+systemctl --user restart ai-crew-panel
+curl -s http://127.0.0.1:NEW_PORT/health
 ```
 
-### Metoda 2: .env plik
-
-Utwórz `.env` w katalogu projektu:
-```
-PORT_AI_CREW_COCKPIT=5100
-PORT_NEW_API=3100
-PORT_DOC_PORTAL=5101
-PORT_AI_ANALIZA=5102
-PORT_PANEL=5103
-PORT_N8N=5104
-```
-
-Następnie załaduj:
-```bash
-source .env
-node server.js
-```
-
-## Nowe Endpointy API
-
-### 1. `/ports/config` - Aktualna Konfiguracja Portów
+### Metoda 2: jednorazowo ze zmienną środowiskową
 
 ```bash
-curl http://localhost:5057/ports/config
+PORT=5103 node server.js
 ```
 
-Odpowiedź:
+Watchdog czyta port z `.env`, więc nie trzeba go osobno przestawiać.
+
+## Endpointy diagnostyczne
+
+### `GET /health`
+
 ```json
 {
   "ok": true,
-  "portConfig": {
-    "AI_CREW_COCKPIT": 5055,
-    "NEW_API": 3000,
-    "DOC_PORTAL": 5056,
-    "AI_ANALIZA": 5000,
-    "PANEL": 5057,
-    "N8N": 5678
-  },
-  "env": {
-    "PORT_AI_CREW_COCKPIT": "not set",
-    "PORT_NEW_API": "not set",
-    "PORT_DOC_PORTAL": "not set",
-    "PORT_AI_ANALIZA": "not set",
-    "PORT_PANEL": "not set",
-    "PORT_N8N": "not set"
-  }
+  "service": "ai-crew-panel",
+  "managerReady": true,
+  "publicHost": "192.168.8.209",
+  "publicHostSource": "auto",
+  "requestHost": null,
+  "panelUrl": "http://192.168.8.209:5057"
 }
 ```
 
-### 2. `/ports/available` - Skanowanie Dostępnych Portów
+`publicHostSource` przyjmuje wartości `auto` (adres wykryty z interfejsów)
+albo `env` (wymuszony przez `PUBLIC_HOST`).
 
-```bash
-# Domyślnie skanuje 5000-50100, zwraca 20 dostępnych portów
-curl http://localhost:5057/ports/available
+### `POST /api/scan`
 
-# Z parametrami
-curl 'http://localhost:5057/ports/available?start=6000&end=6100'
-```
+Skanuje zakres 3000–9000 i zapisuje porty nieprzypisane do żadnego wpisu
+w katalogu. Wynik trafia do sekcji „Wykryte porty”.
 
-Odpowiedź:
-```json
-{
-  "ok": true,
-  "available": [5001, 5002, 5003, ...],
-  "occupied": [5000, 5056, 5057, 5678, ...],
-  "rangeStart": 5000,
-  "rangeEnd": 50100,
-  "message": "Found available ports in range"
-}
-```
+## Jak panel wybiera adres IP
 
-## Dashboard UI
+1. `PUBLIC_HOST` / `SERVER_HOST` z `.env`, jeśli ustawione i różne od `auto`.
+2. W przeciwnym razie pierwszy nie-wewnętrzny adres IPv4, w kolejności
+   preferencji: `192.168.x.x` → `10.x.x.x` → inne → `172.16-31.x.x` (Docker)
+   → `100.x.x.x` (Tailscale).
 
-Panel (:5057) zawiera przycisk **"Port Config"** w sekcji "Status usług", 
-który wyświetla aktualną konfigurację portów.
-
-## Rekomendacje
-
-1. **Sprawdź Dostępne Porty**: Użyj `/ports/available` aby znaleźć wolne porty
-2. **Ustaw Zmienne**: Wybierz dostępne porty i ustaw zmienne środowiskowe
-3. **Zrestartuj Usługi**: Przeznacz każdej usłudze nowy port
-
-## Przykład Konfiguracji Alternatywnych Portów
-
-Jeśli domyślne porty są zajęte, użyj:
-
-```bash
-export PORT_AI_CREW_COCKPIT=6055
-export PORT_NEW_API=6000
-export PORT_DOC_PORTAL=6056
-export PORT_AI_ANALIZA=6100
-export PORT_PANEL=6057
-export PORT_N8N=6678
-
-node server.js
-```
-
-Następnie zmień konfigurację w każdej usłudze (każdy serwis ma swoją konfigurację portów).
+Dzięki temu kopia panelu przeniesiona na inny serwer sama wygeneruje poprawne
+linki do aplikacji — bez edycji kodu i bez zaszytego na stałe IP.

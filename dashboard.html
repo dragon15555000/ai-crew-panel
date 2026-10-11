@@ -616,6 +616,12 @@
       background: rgba(56,189,248,0.12);
     }
 
+    .badge.disabled {
+      color: var(--muted);
+      border-color: rgba(148,163,184,0.3);
+      background: rgba(148,163,184,0.12);
+    }
+
     .info-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -901,7 +907,7 @@
         </div>
       </div>
       <div class="topbar-right">
-        <span class="chip">Serwer: <strong id="server-host">192.168.8.209</strong></span>
+        <span class="chip" id="server-chip" title="Adres wykrywany automatycznie z interfejsów sieciowych">Serwer: <strong id="server-host">wykrywanie…</strong></span>
         <span class="chip">Panel: <strong id="panel-port">5057</strong></span>
         <span class="chip" id="gpu-status-chip">GPU: <strong id="gpu-status-text">...</strong></span>
         <span class="chip" id="llm-status-chip">LLM: <strong id="llm-status-text">...</strong></span>
@@ -993,7 +999,7 @@
         <div class="panel-header" style="margin-top: 6px;">
           <div>
             <h2>Router Ollama</h2>
-            <div class="meta" id="ollama-router-meta">NVIDIA jako główny backend, AMD-Vulkan jako lekki worker.</div>
+            <div class="meta" id="ollama-router-meta">Router dobiera backend na podstawie dostępnych endpointów Ollama.</div>
           </div>
           <button class="btn" onclick="refreshOllamaEndpoints(true)">Odśwież endpointy</button>
         </div>
@@ -1036,6 +1042,7 @@
         <option value="all">Wszystkie statusy</option>
         <option value="running">Running</option>
         <option value="stopped">Stopped</option>
+        <option value="disabled">Wyłączone / archiwalne</option>
         <option value="port_open">Port open</option>
         <option value="port_open_no_health">Port open / no health</option>
         <option value="missing_port">Missing port</option>
@@ -1358,13 +1365,19 @@
       const vramMb = Math.round(ollama.vram_loaded_mb || 0);
       const loadedOnGpu = loadedCount > 0 && vramMb > 0;
 
-      let gpuText = "brak GPU";
-      let gpuClass = "err";
+      // Serwer bez kart graficznych to poprawny, oczekiwany stan — nie jest błędem.
+      const gpuPresent = gpuInfo.present ?? (gpuInfo.available && gpus.length > 0);
+      let gpuText = "brak kart GPU";
+      let gpuClass = "ok";
+      let gpuTitle = gpuInfo.message || "Serwer nie posiada kart graficznych (CPU-only)";
       if (gpuInfo.available && gpus.length) {
         gpuText = `${gpus.length} GPU · ${maxGpuUtil}% · VRAM ${maxVramPct}%`;
         gpuClass = maxGpuUtil >= 85 || maxVramPct >= 85 ? "warn" : "ok";
-      } else if (gpuInfo.error) {
-        gpuText = "niedostepne";
+        gpuTitle = gpus.map(gpu => gpu.name).filter(Boolean).join(", ");
+      } else if (gpuPresent) {
+        gpuText = "GPU bez sterownika";
+        gpuClass = "warn";
+        gpuTitle = gpuInfo.error || gpuTitle;
       }
 
       let llmText = "offline";
@@ -1379,12 +1392,14 @@
       }
 
       const menuText = [
-        gpuInfo.available && gpus.length ? `GPU ${activeGpuCount}/${gpus.length}` : "GPU off",
+        gpuInfo.available && gpus.length
+          ? `GPU ${activeGpuCount}/${gpus.length}`
+          : (gpuPresent ? "GPU bez sterownika" : "bez GPU"),
         ollama.available ? `LLM ${loadedOnGpu ? loadedCount : "CPU"}` : "LLM off"
       ].join(" · ");
       const menuClass = gpuClass === "err" || llmClass === "err" ? "err" : (gpuClass === "warn" || llmClass === "warn" ? "warn" : "ok");
 
-      return { gpuText, gpuClass, llmText, llmClass, menuText, menuClass };
+      return { gpuText, gpuClass, gpuTitle, llmText, llmClass, menuText, menuClass };
     }
 
     function renderHardwareStatusSummary(hw) {
@@ -1392,6 +1407,7 @@
       el.gpuStatusText.textContent = summary.gpuText;
       el.llmStatusText.textContent = summary.llmText;
       el.menuHardwareStatus.textContent = summary.menuText;
+      el.gpuStatusChip.title = summary.gpuTitle || "";
       setStatusClass(el.gpuStatusChip, summary.gpuClass);
       setStatusClass(el.llmStatusChip, summary.llmClass);
       setStatusClass(el.menuHardwareStatus, summary.menuClass);
@@ -1425,6 +1441,10 @@
       const ollama = hw.ollama || {};
 
       renderHardwareStatusSummary(hw);
+
+      el.ollamaRouterMeta.textContent = gpuInfo.available
+        ? "Router wybiera backend na podstawie typu zadania i dostępnych endpointów Ollama."
+        : "Serwer bez kart graficznych — Ollama pracuje na CPU, router kieruje zadania do dostępnego endpointu.";
 
       el.hardwareMeta.textContent = [
         sys.hostname || "serwer",
@@ -1512,14 +1532,20 @@
           `);
         }
       } else {
+        const gpuHardwarePresent = gpuInfo.present === true;
+        const gpuCardTitle = gpuHardwarePresent ? "Karta GPU bez sterownika" : "Brak kart graficznych";
+        const gpuCardSub = gpuHardwarePresent
+          ? ([gpuInfo.message, gpuInfo.error].filter(Boolean).join(" · ") || "Wykryto GPU, ale nie odpowiadają nvidia-smi / amdgpu.")
+          : (gpuInfo.message || "Serwer pracuje wyłącznie na CPU — monitorowane są tylko zasoby systemowe.");
+
         cards.push(`
           <div class="gpu-card">
             <div class="gpu-card-head">
               <div>
-                <h3>Brak NVIDIA GPU</h3>
-                <div class="sub">${escapeHtml(gpuInfo.error || "nvidia-smi niedostępne — sprawdź sterowniki")}</div>
+                <h3>${escapeHtml(gpuCardTitle)}</h3>
+                <div class="sub">${escapeHtml(gpuCardSub)}</div>
               </div>
-              <span class="badge missing_port">brak</span>
+              <span class="badge ${gpuHardwarePresent ? "missing_port" : "stopped"}">${gpuHardwarePresent ? "brak sterownika" : "CPU-only"}</span>
             </div>
           </div>
         `);
@@ -1816,8 +1842,10 @@
 
       el.appsGrid.innerHTML = filtered.map(({ app, status }) => {
         const statusName = status.status || "unknown";
-        const canStart = Boolean(app.enabled && app.startCommand && app.path);
-        const canStop = Boolean(app.port || app.stopStrategy === "docker");
+        // Start wymaga tylko komendy — ścieżka jest wyłącznie katalogiem roboczym,
+        // więc usługi systemd/Docker działają też bez lokalnego katalogu projektu.
+        const canStart = Boolean(app.enabled && app.startCommand);
+        const canStop = Boolean(app.stopStrategy !== "none" && (app.stopCommand || app.port || app.stopStrategy === "docker"));
         const canRestart = Boolean(canStart && canStop);
         const details = [
           `<div><strong>Port</strong><br>${escapeHtml(getPortLabel(app))}</div>`,
@@ -1875,8 +1903,8 @@
 
       const app = selected.app;
       const status = selected.status || {};
-      const canStart = Boolean(app.enabled && app.startCommand && app.path);
-      const canStop = Boolean(app.port || app.stopStrategy === "docker");
+      const canStart = Boolean(app.enabled && app.startCommand);
+      const canStop = Boolean(app.stopStrategy !== "none" && (app.stopCommand || app.port || app.stopStrategy === "docker"));
       const canRestart = Boolean(canStart && canStop);
       const dependencies = selected.dependencies || [];
       const logs = selected.logs || [];
@@ -1949,8 +1977,9 @@
                 <input class="field" id="detail-healthUrl" value="${escapeHtml(app.healthUrl || "")}" />
               </label>
             </div>
-            <label>URL
+            <label>URL (szablon)
               <input class="field" id="detail-url" value="${escapeHtml(app.url || "")}" />
+              <span class="meta" style="font-size:11px; display:block; margin-top:4px;">Użyj <code>{host}</code> — panel wstawi wykryty adres serwera. Puste = adres z portu.</span>
             </label>
             <label>Zależności
               <input class="field" id="detail-dependencies" value="${escapeHtml((app.dependencies || []).join(", "))}" />
@@ -2187,10 +2216,17 @@
       }
     }
 
-    let PUBLIC_HOST = window.__PANEL_PUBLIC_HOST__ || window.location.hostname || "192.168.8.209";
+    let PUBLIC_HOST = window.__PANEL_PUBLIC_HOST__ || window.location.hostname || "127.0.0.1";
+
+    // Linki aplikacji mogą używać tokenu {host}, np. "http://{host}:5080".
+    // Token jest podstawiany aktualnie wykrytym adresem serwera, więc katalog
+    // aplikacji nie zawiera już zaszytego IP.
+    function resolveHostToken(url) {
+      return String(url ?? "").replace(/\{host\}/gi, PUBLIC_HOST);
+    }
 
     function publicAppUrl(port, explicitUrl) {
-      if (explicitUrl) return explicitUrl;
+      if (explicitUrl) return resolveHostToken(explicitUrl);
       return port ? `http://${PUBLIC_HOST}:${port}` : "";
     }
 
@@ -2198,10 +2234,18 @@
       try {
         const res = await fetch("/health");
         const data = await res.json();
-        if (data.publicHost) {
-          PUBLIC_HOST = data.publicHost;
+        const host = data.requestHost || data.publicHost;
+        if (host) {
+          PUBLIC_HOST = host;
           const hostEl = document.getElementById("server-host");
           if (hostEl) hostEl.textContent = PUBLIC_HOST;
+        }
+
+        const chipEl = document.getElementById("server-chip");
+        if (chipEl) {
+          chipEl.title = data.publicHostSource === "env"
+            ? "Adres wymuszony zmienną PUBLIC_HOST w .env"
+            : "Adres wykryty automatycznie z interfejsów sieciowych (możesz wymusić PUBLIC_HOST w .env)";
         }
       } catch (_) {}
     }

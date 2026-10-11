@@ -1,0 +1,12 @@
+[Unit]
+Description=Uruchamia watchdog AI Crew Panel co minutę
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Persistent=false
+Unit=ai-crew-panel-watchdog.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=AI Crew Panel watchdog (sprawdza /health i restartuje panel)
+After=ai-crew-panel.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projekty/ai-crew-panel
+Environment=XDG_RUNTIME_DIR=%t
+ExecStart=%h/projekty/ai-crew-panel/watchdog.sh
+SyslogIdentifier=ai-crew-panel-watchdog

@@ -1,11 +1,8 @@
-const express = require("express");
 const fs = require("fs");
 const path = require("path");
-const LocalAppsManager = require("./server-manager");
-const { collectHardwareSnapshot } = require("./gpu-monitor");
-const { getAllEndpointStatuses, routeOllamaRequest } = require("./ollama-router");
 
-// Załaduj .env bez dodatkowej zależności (systemd też używa EnvironmentFile).
+// .env ładujemy PRZED require modułów zależnych od konfiguracji — gpu-monitor.js
+// i ollama-router.js czytają process.env już w momencie wczytywania modułu.
 const envPath = path.join(__dirname, ".env");
 if (fs.existsSync(envPath)) {
   for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
@@ -19,10 +16,46 @@ if (fs.existsSync(envPath)) {
   }
 }
 
+const os = require("os");
+const express = require("express");
+const LocalAppsManager = require("./server-manager");
+const { collectHardwareSnapshot } = require("./gpu-monitor");
+const { getAllEndpointStatuses, routeOllamaRequest } = require("./ollama-router");
+
+// PUBLIC_HOST można wymusić zmienną środowiskową, ale domyślnie wykrywamy go
+// z lokalnych interfejsów sieciowych. Dzięki temu ta sama kopia panelu działa
+// poprawnie po przeniesieniu na inny serwer/adres bez edycji kodu.
+// Wartości "auto" / "detect" / "dynamic" (oraz pusta) oznaczają autowykrywanie.
+function resolvePublicHost() {
+  const override = (process.env.PUBLIC_HOST || process.env.SERVER_HOST || "").trim();
+  if (override && !["auto", "detect", "dynamic"].includes(override.toLowerCase())) {
+    return { host: override, source: "env" };
+  }
+
+  const candidates = [];
+  for (const [iface, addresses] of Object.entries(os.networkInterfaces())) {
+    for (const address of addresses || []) {
+      if (address.family !== "IPv4" || address.internal) continue;
+      candidates.push({ iface, address: address.address });
+    }
+  }
+
+  const score = ({ address }) => {
+    if (address.startsWith("192.168.")) return 0;                       // typowy LAN
+    if (address.startsWith("10.")) return 1;                            // sieć firmowa
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(address)) return 3;           // docker / bridge
+    if (address.startsWith("100.")) return 4;                           // Tailscale CGNAT
+    return 2;
+  };
+
+  candidates.sort((a, b) => score(a) - score(b));
+  return { host: candidates[0]?.address || "127.0.0.1", source: "auto" };
+}
+
 const app = express();
 const PORT = Number(process.env.PORT || process.env.PORT_PANEL || 5057);
 const HOST = process.env.HOST || "0.0.0.0";
-const PUBLIC_HOST = (process.env.PUBLIC_HOST || process.env.SERVER_HOST || "192.168.8.209").trim();
+const { host: PUBLIC_HOST, source: PUBLIC_HOST_SOURCE } = resolvePublicHost();
 const COCKPIT_PORT = Number(process.env.PORT_AI_CREW_COCKPIT || 5500);
 
 // Initialize Local Apps Manager
@@ -99,12 +132,17 @@ app.get("/", (req, res) => {
 });
 
 app.get("/health", (req, res) => {
+  const requestHost = req.hostname && req.hostname !== "localhost" && req.hostname !== "127.0.0.1"
+    ? req.hostname
+    : null;
   res.json({
     ok: true,
     service: "ai-crew-panel",
     managerReady,
     publicHost: PUBLIC_HOST,
-    panelUrl: `http://${PUBLIC_HOST}:${PORT}`,
+    publicHostSource: PUBLIC_HOST_SOURCE,
+    requestHost,
+    panelUrl: `http://${requestHost || PUBLIC_HOST}:${PORT}`,
     ts: new Date().toISOString()
   });
 });
@@ -286,7 +324,9 @@ app.post("/api/apps/discover/:port", async (req, res) => {
 app.post("/api/apps/restart-enabled", async (req, res) => {
   if (!managerReady) return res.status(503).json({ ok: false, error: "Manager not ready" });
 
-  const enabledApps = manager.config.apps.filter(app => app.enabled && app.startCommand && app.path);
+  // Panelu nie restartujemy w tej pętli — przerwałoby to obsługę własnego
+  // żądania HTTP i pozostałe aplikacje nie zostałyby zrestartowane.
+  const enabledApps = manager.config.apps.filter(app => app.enabled && app.startCommand && app.port !== PORT);
   const results = [];
 
   for (const app of enabledApps) {

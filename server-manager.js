@@ -68,6 +68,13 @@ class LocalAppsManager {
       return result;
     }
 
+    // Wpisy wyłączone (projekty archiwalne, aplikacje nieobecne na tym hoście)
+    // nie są odpytywane — panel pokazuje je jako "disabled", a nie "stopped".
+    if (app.enabled === false) {
+      result.status = "disabled";
+      return result;
+    }
+
     if (!app.port) {
       result.status = "missing_port";
       return result;
@@ -155,16 +162,28 @@ class LocalAppsManager {
     if (this.operationLog.length > 100) this.operationLog.pop();
   }
 
+  // Katalog roboczy to tylko wygoda: usługi systemowe (systemd) i kontenery
+  // Docker nie potrzebują lokalnej ścieżki projektu, a wpis w katalogu może
+  // wskazywać katalog niedostępny dla użytkownika panelu.
+  async resolveWorkingDir(candidate) {
+    if (candidate) {
+      const stat = await fs.stat(candidate).catch(() => null);
+      if (stat && stat.isDirectory()) return candidate;
+      console.warn(`Ścieżka robocza niedostępna (${candidate}) — używam katalogu domowego`);
+    }
+    return require("os").homedir();
+  }
+
   async startApp(appId) {
     const app = this.config.apps.find(a => a.id === appId);
     if (!app) return { ok: false, error: "App not found" };
     if (!app.startCommand) return { ok: false, error: "No start command configured" };
-    if (!app.path) return { ok: false, error: "App path not configured" };
 
+    const cwd = await this.resolveWorkingDir(app.path);
     const startTime = Date.now();
     try {
       const child = spawn(app.startCommand, {
-        cwd: app.path,
+        cwd,
         shell: true,
         detached: true,
         stdio: "ignore"
@@ -230,13 +249,24 @@ class LocalAppsManager {
 
     if (app.stopCommand) {
       try {
-        await execAsync(app.stopCommand, { timeout: 15000, cwd: app.path || undefined });
+        const cwd = await this.resolveWorkingDir(app.path);
+        await execAsync(app.stopCommand, { timeout: 15000, cwd });
         this.logOperation(appId, "stop", "success", null);
         return { ok: true, message: `${app.name} stopped via stopCommand` };
       } catch (e) {
         this.logOperation(appId, "stop", "failed", e.message);
         return { ok: false, error: e.message.slice(0, 200) };
       }
+    }
+
+    // Wpisy tylko monitorowane (np. usługi systemowe bez uprawnień do zarządzania
+    // albo zasoby zewnętrzne) — nie próbujemy zabijać ich procesów.
+    if (app.stopStrategy === "none") {
+      this.logOperation(appId, "stop", "failed", "not manageable");
+      return {
+        ok: false,
+        error: `${app.name} jest tylko monitorowana — zatrzymanie poza panelem (np. sudo systemctl stop ...)`
+      };
     }
 
     if (app.stopStrategy === "docker") {
@@ -461,8 +491,9 @@ class LocalAppsManager {
     const portOpenNoHealth = statusCounts.port_open_no_health || 0;
     const missingPort = statusCounts.missing_port || 0;
     const missingPath = statusCounts.missing_path || 0;
+    const disabled = statusCounts.disabled || 0;
     const errors = statusCounts.error || 0;
-    const known = running + stopped + portOpen + portOpenNoHealth + missingPort + missingPath + errors;
+    const known = running + stopped + portOpen + portOpenNoHealth + missingPort + missingPath + disabled + errors;
     const unknown = currentStatuses.length - known;
 
     const problemApps = currentStatuses
@@ -481,6 +512,7 @@ class LocalAppsManager {
       enabledApps: apps.filter(app => app.enabled).length,
       runningApps: running,
       stoppedApps: stopped,
+      disabledApps: disabled,
       portOpenApps: portOpen,
       missingPathApps: missingPath,
       unknownApps: unknown,

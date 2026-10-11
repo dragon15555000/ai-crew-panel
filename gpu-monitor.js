@@ -51,6 +51,11 @@ async function readText(filePath) {
   }
 }
 
+async function whichCmd(cmd) {
+  const result = await runCmd("which", [cmd], 2000);
+  return result.ok && result.stdout.trim() ? result.stdout.trim().split("\n")[0] : null;
+}
+
 async function readNumberFile(filePath, divisor = 1) {
   const text = await readText(filePath);
   if (!text) return null;
@@ -156,6 +161,76 @@ async function getDisplayAdapterNames() {
     acc[busId] = description;
     return acc;
   }, {});
+}
+
+// Vendory, które realnie liczą (CUDA / ROCm). Wirtualne karty (np. QEMU 0x1234)
+// nie są kartami obliczeniowymi, więc serwer traktujemy jako "bez GPU".
+const COMPUTE_VENDOR_NAMES = {
+  "0x10de": "nvidia",
+  "0x1002": "amd"
+};
+
+async function listDrmCards() {
+  try {
+    return (await fs.readdir("/sys/class/drm"))
+      .filter(name => /^card\d+$/.test(name))
+      .sort();
+  } catch (_) {
+    return [];
+  }
+}
+
+// Wykrywa fizyczną obecność kart obliczeniowych (NVIDIA/AMD), niezależnie od
+// tego, czy działają sterowniki i narzędzia (nvidia-smi / amdgpu).
+async function detectComputeGpuHardware() {
+  const devices = [];
+  const vendors = new Set();
+
+  for (const card of await listDrmCards()) {
+    const devicePath = `/sys/class/drm/${card}/device`;
+    const vendorId = (await readText(path.join(devicePath, "vendor")))?.toLowerCase() || null;
+    const deviceId = (await readText(path.join(devicePath, "device")))?.toLowerCase() || null;
+    const vendor = COMPUTE_VENDOR_NAMES[vendorId] || (vendorId ? "other" : "unknown");
+    const realDevicePath = await fs.realpath(devicePath).catch(() => null);
+    devices.push({
+      card,
+      vendor,
+      vendor_id: vendorId,
+      device_id: deviceId,
+      bus_id: realDevicePath ? path.basename(realDevicePath).toUpperCase() : null
+    });
+    if (COMPUTE_VENDOR_NAMES[vendorId]) vendors.add(vendor);
+  }
+
+  // Uzupełnienie: GPU bez węzła DRM (brak sterownika / przekazane do vfio).
+  const lspci = await runCmd("lspci", ["-nn"], 4000);
+  if (lspci.ok) {
+    for (const line of lspci.stdout.split("\n")) {
+      if (!/(VGA compatible controller|3D controller|Display controller)/i.test(line)) continue;
+      const match = line.match(/\[([0-9a-fA-F]{4}):([0-9a-fA-F]{4})\]/);
+      const vendorId = match ? `0x${match[1].toLowerCase()}` : null;
+      const vendor = COMPUTE_VENDOR_NAMES[vendorId];
+      if (!vendor) continue;
+      vendors.add(vendor);
+      const busId = (line.trim().split(/\s+/)[0] || "").toUpperCase() || null;
+      const known = busId && devices.some(d => d.bus_id && (d.bus_id.endsWith(busId) || busId.endsWith(d.bus_id)));
+      if (!known) {
+        devices.push({
+          card: null,
+          vendor,
+          vendor_id: vendorId,
+          device_id: match ? `0x${match[2].toLowerCase()}` : null,
+          bus_id: busId
+        });
+      }
+    }
+  }
+
+  return {
+    present: vendors.size > 0,
+    vendors: [...vendors],
+    devices
+  };
 }
 
 async function findHwmonDir(devicePath) {
@@ -333,13 +408,25 @@ function getSystemMemory() {
 }
 
 async function collectHardwareSnapshot() {
-  const [nvidia, processes, ollama] = await Promise.all([
-    getNvidiaGpus(),
-    getNvidiaProcesses(),
-    getOllamaStatus()
-  ]);
+  const hardware = await detectComputeGpuHardware();
+
+  // nvidia-smi odpytujemy tylko wtedy, gdy karta NVIDIA faktycznie istnieje —
+  // na serwerze bez GPU nie generujemy wtedy żadnego błędu.
+  let nvidia = { available: false, gpus: [], error: null };
+  if (hardware.vendors.includes("nvidia")) {
+    const nvidiaTool = await whichCmd("nvidia-smi");
+    nvidia = nvidiaTool
+      ? await getNvidiaGpus()
+      : { available: false, gpus: [], error: "brak narzędzia nvidia-smi" };
+  }
+
+  const processes = nvidia.gpus?.length ? await getNvidiaProcesses() : [];
+  const ollama = await getOllamaStatus();
+
   const nvidiaBusIds = new Set((nvidia.gpus || []).map(gpu => String(gpu.bus_id || "").toUpperCase()).filter(Boolean));
-  const amd = await getAmdGpus(nvidiaBusIds);
+  const amd = hardware.vendors.includes("amd")
+    ? await getAmdGpus(nvidiaBusIds)
+    : { available: false, gpus: [] };
 
   const system = getSystemMemory();
   const gpus = [
@@ -351,14 +438,28 @@ async function collectHardwareSnapshot() {
     display_index: i
   }));
 
+  const available = gpus.length > 0;
+  const present = hardware.present || available;
+  const reason = available ? null : (present ? "driver_missing" : "no_gpu_hardware");
+  const message = available
+    ? null
+    : present
+      ? "Wykryto kartę graficzną, ale brak działającego sterownika/narzędzi (nvidia-smi, amdgpu)"
+      : "Brak kart graficznych — serwer pracuje wyłącznie na CPU";
+
   return {
     ok: true,
     ts: new Date().toISOString(),
     gpu: {
-      vendor: gpus.length ? "mixed" : "none",
-      available: gpus.length > 0,
-      error: gpus.length ? null : (nvidia.error || null),
+      vendor: available ? (hardware.vendors.length > 1 ? "mixed" : (gpus[0].vendor || "mixed")) : "none",
+      available,
+      present,
+      reason,
+      message,
+      error: available ? null : (present ? (nvidia.error || null) : null),
       count: gpus.length,
+      vendors: hardware.vendors,
+      devices: hardware.devices,
       gpus,
       processes
     },
@@ -375,6 +476,7 @@ async function collectHardwareSnapshot() {
 
 module.exports = {
   collectHardwareSnapshot,
+  detectComputeGpuHardware,
   getNvidiaGpus,
   getAmdGpus,
   getOllamaStatus

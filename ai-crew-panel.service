@@ -1,5 +1,6 @@
 [Unit]
 Description=AI Crew Panel (events dashboard)
+Documentation=file://%h/projekty/ai-crew-panel/README.md
 After=network-online.target
 Wants=network-online.target
 
@@ -8,6 +9,13 @@ Type=simple
 WorkingDirectory=%h/projekty/ai-crew-panel
 EnvironmentFile=%h/projekty/ai-crew-panel/.env
 Environment=NODE_ENV=production
+# XDG_RUNTIME_DIR (%t = /run/user/<UID>) jest wymagany, żeby panel mógł
+# wywoływać `systemctl --user start/stop/restart` dla usług użytkownika
+# (ai-crew-cockpit, sam panel) przyciskami Start/Stop/Restart.
+Environment=XDG_RUNTIME_DIR=%t
+# /usr/bin/node jest symlinkiem do binarki z nvm — dzięki temu unit nie zależy
+# od konkretnej wersji Node zainstalowanej w ~/.nvm.
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/usr/bin/node %h/projekty/ai-crew-panel/server.js
 Restart=always
 RestartSec=5
